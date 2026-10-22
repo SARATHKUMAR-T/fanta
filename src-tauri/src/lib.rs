@@ -84,6 +84,13 @@ fn live_context(state: &AppState, conn: &rusqlite::Connection) -> String {
     if !needs_reply.is_empty() {
         out += &format!("Likely need a reply from the user (mentions, questions, urgent):\n{}\n", needs_reply.join("\n"));
     }
+    out += if calendar::provider_conn(conn) == "graph" {
+        "Teams sending: connected - use teams_reply / teams_send_message.\n"
+    } else {
+        "Teams sending: NOT connected. If the user asks you to send a Teams message, don't call the Teams tools; \
+         tell them to connect Microsoft once in Settings → Microsoft 365 (then you can send for them), and offer to \
+         draft the message so they can paste it.\n"
+    };
     let plugins = state.plugins.summary();
     if !plugins.is_empty() {
         out += &format!("Installed plugins:\n{plugins}\n");
@@ -129,6 +136,10 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
     routing_context.push(' ');
     routing_context.push_str(&text);
     let mut schemas = state.tools.schemas();
+    // Without Microsoft sign-in the Teams tools can only fail; small models call them anyway.
+    if calendar::provider(&app) != "graph" {
+        schemas.retain(|t| !t["function"]["name"].as_str().unwrap_or("").starts_with("teams_"));
+    }
     // Cloud models handle many tools well; the small local model gets only the plugins mentioned.
     schemas.extend(if cloud { state.plugins.all_schemas() } else { state.plugins.schemas_for(&routing_context) });
     let rounds = if cloud { MAX_TOOL_ROUNDS * 2 } else { MAX_TOOL_ROUNDS };
@@ -140,7 +151,14 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         .map_err(|e| e.to_string())?;
 
         if reply.tool_calls.is_empty() {
-            let content = reply.content.trim().to_string();
+            let mut content = reply.content.trim().to_string();
+            // The local model can't be trusted to say this, so say it for it.
+            if teams_not_connected_request(&app, &text) {
+                let note = "\n\n(To actually send Teams messages for you, I need Microsoft access once: \
+                            Settings → Microsoft 365. Until then, copy this into Teams, or use ↩ Reply on the message.)";
+                let _ = app.emit("chat://token", note);
+                content.push_str(note);
+            }
             db::insert_message(&state.db.lock().unwrap(), "assistant", &content).map_err(|e| e.to_string())?;
             return Ok(content);
         }
@@ -161,6 +179,35 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         }
     }
     Err("Too many tool rounds; stopping.".into())
+}
+
+/// The user asked to message someone on Teams, but Microsoft sign-in isn't set up.
+fn teams_not_connected_request(app: &AppHandle, text: &str) -> bool {
+    if calendar::provider(app) == "graph" {
+        return false;
+    }
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let asks_to_send = words.iter().any(|w| ["message", "tell", "reply", "text", "ping", "send", "dm", "msg"].contains(w))
+        || lower.contains("let ") && lower.contains(" know")
+        || lower.contains("on my behalf");
+    if !asks_to_send {
+        return false;
+    }
+    if lower.contains("teams") || lower.contains("on my behalf") {
+        return true;
+    }
+    // Names of people who've messaged recently ("tell akilesh ...").
+    let state = app.state::<AppState>();
+    let senders: Vec<String> = db::list_notifications(&state.db.lock().unwrap(), None, None, 200)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| n.source == "Teams")
+        .filter_map(|n| n.sender)
+        .flat_map(|s| s.to_lowercase().split_whitespace().map(String::from).collect::<Vec<_>>())
+        .filter(|w| w.len() > 2)
+        .collect();
+    words.iter().any(|w| senders.iter().any(|s| s == w))
 }
 
 /// Runs one tool call (built-in or plugin), asking the user first when required.

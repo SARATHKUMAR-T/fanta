@@ -693,8 +693,12 @@ async fn teams_reply(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
         db::list_notifications(&conn, None, None, 60)?
             .into_iter()
             .filter(|n| n.source == "Teams" && n.category != "ignore")
+            // Models sometimes pass the chat's name as the sender, so match either.
             .find(|n| match &sender {
-                Some(s) => n.sender.as_deref().unwrap_or(&n.title).to_lowercase().contains(s.as_str()),
+                Some(s) => {
+                    n.sender.as_deref().unwrap_or(&n.title).to_lowercase().contains(s.as_str())
+                        || n.chat.as_deref().is_some_and(|c| c.to_lowercase().contains(s.as_str()))
+                }
                 None => true,
             })
             .ok_or_else(|| anyhow::anyhow!("no recent Teams message from {}", sender.as_deref().unwrap_or("anyone")))?

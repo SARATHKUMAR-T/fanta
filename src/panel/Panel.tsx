@@ -66,6 +66,7 @@ export default function Panel() {
       listen("inbox://changed", refreshUnseen),
       listen<boolean>("panel://visible", (e) => setShown(e.payload)),
       listen("ui://reply-to", () => setView("chat")),
+      listen("ui://open-settings", () => setView("settings")),
     ];
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && api.hidePanel();
     window.addEventListener("keydown", onKey);

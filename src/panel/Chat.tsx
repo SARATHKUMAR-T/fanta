@@ -57,6 +57,8 @@ export default function Chat({ name }: { name: string }) {
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
   const [voiceSetup, setVoiceSetup] = useState<{ installing: boolean; progress?: string; error?: string } | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  // Until Microsoft sign-in is set up, replies are copied and Teams is opened instead.
+  const [teamsConnected, setTeamsConnected] = useState(() => !(import.meta.env.DEV && location.search.includes("nograph")));
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(() =>
     import.meta.env.DEV && location.search.includes("replyDemo")
       ? { id: 2, sender: "Akilesh", chat: "Aarthi Selvakumari, +3", text: "did you push the creator studio changes?" }
@@ -89,7 +91,8 @@ export default function Chat({ name }: { name: string }) {
         ),
       ),
       listen<boolean>("panel://visible", (e) => e.payload && setTimeout(() => inputRef.current?.focus(), 50)),
-      listen<ReplyTarget>("ui://reply-to", (e) => {
+      listen<ReplyTarget>("ui://reply-to", async (e) => {
+        setTeamsConnected((await api.calendarStatus()).provider === "graph");
         setReplyTo(e.payload);
         setTimeout(() => inputRef.current?.focus(), 80);
       }),
@@ -122,6 +125,21 @@ export default function Chat({ name }: { name: string }) {
 
   /** Reply box mode: the user's exact words go straight to that Teams chat. */
   async function sendReply(target: ReplyTarget, text: string) {
+    if (!teamsConnected) {
+      // No permission to send yet: hand the text over to Teams in the browser.
+      await navigator.clipboard.writeText(text).catch(() => {});
+      await api.openLink("https://teams.cloud.microsoft/");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `📋 Copied your reply and opened Teams - paste it into ${target.chat ? `“${target.chat}”` : `your chat with ${target.sender}`}. To let me send it for you next time, connect Microsoft in Settings.`,
+        },
+      ]);
+      setDraft("");
+      setReplyTo(null);
+      return;
+    }
     setBusy(true);
     setToolNote("Sending on Teams");
     try {
@@ -297,6 +315,14 @@ export default function Chat({ name }: { name: string }) {
               {replyTo.chat && <span className="muted"> in {replyTo.chat}</span>}
             </div>
             <div className="reply-chip-quote">“{replyTo.text}”</div>
+            {!teamsConnected && (
+              <div className="reply-chip-setup">
+                Not connected yet - Send will copy your reply and open Teams.{" "}
+                <button className="btn link small" onClick={() => emit("ui://open-settings")}>
+                  Connect Microsoft to send directly →
+                </button>
+              </div>
+            )}
           </div>
           <button className="icon-btn" title="Cancel reply" onClick={() => setReplyTo(null)}>
             ×

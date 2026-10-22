@@ -568,3 +568,5 @@ select.cat.urgent { color: var(--danger); }
 .reply-chip-to { font-size: 12.5px; }
 .reply-chip-quote { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .approval-text { white-space: pre-wrap; }
+.reply-chip-setup { margin-top: 4px; font-size: 12px; color: var(--accent-ink); font-weight: 600; }
+.reply-chip-setup .btn.link { height: auto; padding: 0; font-size: 12px; color: var(--accent-ink); text-decoration: underline; }

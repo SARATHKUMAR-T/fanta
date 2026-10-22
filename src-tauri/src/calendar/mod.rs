@@ -54,6 +54,11 @@ fn set(app: &AppHandle, key: &str, value: &str) -> anyhow::Result<()> {
     db::set_setting(&app.state::<AppState>().db.lock().unwrap(), key, value)
 }
 
+/// Same as `provider`, for callers already holding the db lock.
+pub fn provider_conn(conn: &rusqlite::Connection) -> String {
+    db::get_setting(conn, PROVIDER).ok().flatten().unwrap_or_else(|| "none".into())
+}
+
 pub fn provider(app: &AppHandle) -> String {
     setting(app, PROVIDER).unwrap_or_else(|| "none".into())
 }
