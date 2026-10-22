@@ -1,0 +1,31 @@
+.character { overflow: visible; display: block; }
+.character .body { animation: breathe 3.6s ease-in-out infinite; transform-origin: 100px 220px; }
+.character .head { animation: sway 5.2s ease-in-out infinite; transform-origin: 100px 150px; }
+.character .ahoge { animation: boing 2.6s ease-in-out infinite; transform-origin: 104px 37px; }
+.character .eye { animation: blink 4.8s infinite; }
+.character .eyes .eye:nth-child(2) { animation-delay: 0.02s; }
+.character .talk { animation: talk 0.28s ease-in-out infinite alternate; transform-origin: 100px 132px; }
+.character .thought circle { animation: float 1.6s ease-in-out infinite; }
+.character .thought circle:nth-child(2) { animation-delay: 0.2s; }
+.character .thought circle:nth-child(3) { animation-delay: 0.4s; }
+.character .alert-mark { animation: pop 0.6s ease-out infinite alternate; transform-origin: 166px 40px; }
+.character .zzz { animation: zzz 2.4s ease-in-out infinite; }
+.mood-happy .head { animation: hop 0.9s ease-in-out 2, sway 5.2s ease-in-out 1.8s infinite; }
+.mood-focus .head { animation: nod 2.4s ease-in-out infinite; }
+.mood-sleepy .head { animation: doze 4s ease-in-out infinite; }
+
+@keyframes breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.025); } }
+@keyframes sway { 0%, 100% { transform: rotate(-1.6deg); } 50% { transform: rotate(1.6deg); } }
+@keyframes boing { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(8deg); } }
+@keyframes blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(0.08); } }
+@keyframes talk { from { transform: scaleY(0.35); } to { transform: scaleY(1.1); } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes pop { from { transform: scale(0.9); } to { transform: scale(1.1); } }
+@keyframes zzz { 0% { opacity: 0; transform: translate(0, 0); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(10px, -16px); } }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-7px) rotate(-2deg); } }
+@keyframes nod { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(2.5deg) translateY(1px); } }
+@keyframes doze { 0%, 100% { transform: rotate(4deg) translateY(2px); } 50% { transform: rotate(6deg) translateY(3px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .character * { animation: none !important; }
+}

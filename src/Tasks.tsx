@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, friendlyTime, parseTs, Task } from "./api";
-import { startFocus } from "./FocusBar";
+import { startFocus } from "./panel/focus";
 
 export default function Tasks({ onCount }: { onCount: (n: number) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);

@@ -41,7 +41,7 @@ export default function CalendarView({ onConnect }: { onConnect: () => void }) {
       <section className="calendar">
         <div className="empty">
           <p>Connect your Outlook calendar and I'll give you a heads-up before meetings, keep focus blocks clear of them, and answer “when am I free?”.</p>
-          <button className="primary" onClick={onConnect}>
+          <button className="btn primary" onClick={onConnect}>
             Connect Outlook
           </button>
         </div>
@@ -66,7 +66,16 @@ export default function CalendarView({ onConnect }: { onConnect: () => void }) {
               const declined = e.response === "declined";
               return (
                 <li key={e.num} className={`event ${live ? "live" : ""} ${past ? "past" : ""} ${declined ? "declined" : ""}`}>
-                  <div className="event-time">{e.all_day ? "all day" : `${hm(e.start_at)}–${hm(e.end_at)}`}</div>
+                  <div className="event-time">
+                    {e.all_day ? (
+                      "all day"
+                    ) : (
+                      <>
+                        <b>{hm(e.start_at)}</b>
+                        <span>{hm(e.end_at)}</span>
+                      </>
+                    )}
+                  </div>
                   <div className="event-body">
                     <div className="event-title">{e.subject}</div>
                     <div className="muted small">
@@ -82,7 +91,7 @@ export default function CalendarView({ onConnect }: { onConnect: () => void }) {
                     </div>
                   </div>
                   {e.join_url && !past && (
-                    <button className={live || soon ? "primary" : "ghost"} onClick={() => api.openLink(e.join_url!)}>
+                    <button className={`btn ${live || soon ? "primary" : "soft"} small`} onClick={() => api.openLink(e.join_url!)}>
                       Join
                     </button>
                   )}

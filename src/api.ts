@@ -75,6 +75,18 @@ export type DeviceCode = {
 
 export type ApprovalRequest = { id: number; tool: string; text: string };
 
+export type PluginTool = { name: string; description: string; read_only: boolean; auto_approve: boolean };
+
+export type PluginInfo = {
+  name: string;
+  status: "disabled" | "starting" | "running" | "error";
+  detail: string | null;
+  command: string;
+  triggers: string[];
+  tools: PluginTool[];
+  log: string[];
+};
+
 export const api = {
   persona: () => invoke<Persona>("get_persona"),
   history: () => invoke<{ role: string; content: string }[]>("get_history"),
@@ -100,6 +112,17 @@ export const api = {
   calendarSync: () => invoke<void>("calendar_sync"),
   calendarEvents: (from: string, to: string) => invoke<CalEvent[]>("calendar_events", { from, to }),
   openLink: (url: string) => invoke<void>("open_link", { url }),
+  togglePanel: () => invoke<void>("toggle_panel"),
+  hidePanel: () => invoke<void>("hide_panel"),
+  companionBubble: (visible: boolean) => invoke<void>("companion_bubble", { visible }),
+  pluginsInfo: () => invoke<PluginInfo[]>("plugins_info"),
+  pluginsReload: () => invoke<void>("plugins_reload"),
+  pluginAdd: (name: string, command: string, triggers: string) => invoke<void>("plugin_add", { name, command, triggers }),
+  pluginRemove: (name: string) => invoke<void>("plugin_remove", { name }),
+  pluginSetEnabled: (name: string, enabled: boolean) => invoke<void>("plugin_set_enabled", { name, enabled }),
+  pluginSetAutoApprove: (name: string, tool: string, auto: boolean) =>
+    invoke<void>("plugin_set_auto_approve", { name, tool, auto }),
+  openConfigDir: () => invoke<void>("open_config_dir"),
 };
 
 /** Local "YYYY-MM-DD HH:MM:SS" for a Date, matching the backend. */
@@ -109,7 +132,7 @@ export function toTs(d: Date): string {
 }
 
 export function hm(ts: string): string {
-  return parseTs(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return parseTs(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /** Backend timestamps are local "YYYY-MM-DD HH:MM:SS". */

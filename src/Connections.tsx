@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, CalendarStatus, DeviceCode, friendlyTime } from "./api";
 
-export default function Connections({ onClose }: { onClose: () => void }) {
+export default function Connections() {
   const [status, setStatus] = useState<CalendarStatus | null>(null);
   const [clientId, setClientId] = useState("");
   const [tenant, setTenant] = useState("");
@@ -63,17 +63,10 @@ export default function Connections({ onClose }: { onClose: () => void }) {
   const connected = status && status.provider !== "none";
 
   return (
-    <section className="connections">
-      <div className="conn-head">
-        <h2>Connections</h2>
-        <button className="ghost" onClick={onClose}>
-          Done
-        </button>
-      </div>
-
+    <section className="conn">
       <div className="card">
         <div className="card-title">
-          <span>Outlook calendar</span>
+          <span>📅 Outlook calendar</span>
           {connected && <span className="chip ok">{status.provider === "graph" ? "connected" : "read-only"}</span>}
         </div>
 
@@ -86,10 +79,10 @@ export default function Connections({ onClose }: { onClose: () => void }) {
             </p>
             {status.error && <p className="error-text">{status.error}</p>}
             <div className="row">
-              <button className="ghost" onClick={() => api.calendarSync()}>
+              <button className="btn ghost" onClick={() => api.calendarSync()}>
                 Sync now
               </button>
-              <button className="ghost" onClick={() => api.calendarDisconnect()}>
+              <button className="btn ghost" onClick={() => api.calendarDisconnect()}>
                 Disconnect
               </button>
             </div>
@@ -99,7 +92,7 @@ export default function Connections({ onClose }: { onClose: () => void }) {
             <p>Sign in at the page that just opened and enter this code (it's on your clipboard):</p>
             <div className="code">{code.user_code}</div>
             <div className="row">
-              <button className="ghost" onClick={() => api.openLink(code.verification_uri)}>
+              <button className="btn ghost" onClick={() => api.openLink(code.verification_uri)}>
                 Open sign-in page again
               </button>
             </div>
@@ -118,10 +111,10 @@ export default function Connections({ onClose }: { onClose: () => void }) {
               <input value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" />
             </label>
             <div className="row">
-              <button className="primary" disabled={busy || !clientId.trim() || !tenant.trim()} onClick={signIn}>
+              <button className="btn primary" disabled={busy || !clientId.trim() || !tenant.trim()} onClick={signIn}>
                 Sign in
               </button>
-              <button className="link" onClick={() => setShowGuide(!showGuide)}>
+              <button className="btn link" onClick={() => setShowGuide(!showGuide)}>
                 {showGuide ? "Hide" : "How do I get a client ID?"}
               </button>
             </div>
@@ -153,18 +146,17 @@ export default function Connections({ onClose }: { onClose: () => void }) {
               <input value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics" />
             </label>
             <div className="row">
-              <button className="ghost" disabled={busy || !icsUrl.trim()} onClick={connectIcs}>
+              <button className="btn ghost" disabled={busy || !icsUrl.trim()} onClick={connectIcs}>
                 Connect link
               </button>
             </div>
           </>
         )}
         {message && <p className={message.ok ? "ok-text" : "error-text"}>{message.text}</p>}
+        <p className="muted tiny privacy">
+          🔒 Stays on this computer: the sign-in token lives in your GNOME keyring, calendar data in Fanta's local database.
+        </p>
       </div>
-
-      <p className="muted small">
-        Everything stays on this computer. The sign-in token is kept in your GNOME keyring; calendar data is cached in Fanta's local database.
-      </p>
     </section>
   );
 }

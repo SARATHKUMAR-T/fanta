@@ -9,6 +9,7 @@ mod persona;
 mod plugins;
 mod scheduler;
 mod tools;
+mod windows;
 
 use llm::{Message, Ollama};
 use persona::Persona;
@@ -16,7 +17,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State,
 };
 
 const HISTORY_LIMIT: usize = 20;
@@ -288,16 +289,23 @@ async fn plugin_set_auto_approve(app: AppHandle, name: String, tool: String, aut
 }
 
 #[tauri::command]
-fn open_config_dir() {
-    let _ = std::process::Command::new("xdg-open").arg(persona::config_dir()).spawn();
+fn toggle_panel(app: AppHandle) -> Result<(), String> {
+    windows::toggle_panel(&app).map_err(|e| e.to_string())
 }
 
-fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+#[tauri::command]
+fn hide_panel(app: AppHandle) -> Result<(), String> {
+    windows::hide_panel(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn companion_bubble(app: AppHandle, visible: bool) -> Result<(), String> {
+    windows::set_companion_bubble(&app, visible).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_config_dir() {
+    let _ = std::process::Command::new("xdg-open").arg(persona::config_dir()).spawn();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -336,16 +344,24 @@ pub fn run() {
                 }
             });
 
-            let show = MenuItem::with_id(app, "show", "Open Fanta", true, None::<&str>)?;
+            windows::create(app.handle())?;
+
+            let chat = MenuItem::with_id(app, "chat", "Open chat", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show / hide Fanta", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let menu = Menu::with_items(app, &[&chat, &show, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Fanta")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
-                    "show" => show_main(app),
+                    "chat" => {
+                        let _ = windows::show_panel(app);
+                    }
+                    "show" => {
+                        let _ = windows::toggle_companion(app);
+                    }
                     "quit" => {
                         desktop::dnd_off(&app.state::<AppState>().db.lock().unwrap());
                         app.exit(0)
@@ -354,18 +370,11 @@ pub fn run() {
                 })
                 .on_tray_icon_event(|tray, e| {
                     if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-                        show_main(tray.app_handle());
+                        let _ = windows::toggle_panel(tray.app_handle());
                     }
                 })
                 .build(app)?;
             Ok(())
-        })
-        // Closing the window hides Fanta to the tray instead of quitting.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
         })
         .invoke_handler(tauri::generate_handler![
             get_persona,
@@ -396,7 +405,10 @@ pub fn run() {
             plugin_remove,
             plugin_set_enabled,
             plugin_set_auto_approve,
-            open_config_dir
+            open_config_dir,
+            toggle_panel,
+            hide_panel,
+            companion_bubble
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

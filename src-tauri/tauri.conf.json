@@ -10,13 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Fanta", "label": "main",
-        "width": 460,
-        "height": 680
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
