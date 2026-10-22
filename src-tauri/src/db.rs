@@ -70,6 +70,20 @@ pub fn open() -> anyhow::Result<Connection> {
             ended_at TEXT,
             completed INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app TEXT NOT NULL,
+            source TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'pending',
+            summary TEXT,
+            reason TEXT,
+            during_focus INTEGER NOT NULL DEFAULT 0,
+            seen INTEGER NOT NULL DEFAULT 0,
+            received_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS notifications_received ON notifications (received_at);
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -222,6 +236,115 @@ pub fn last_focus_activity(conn: &Connection) -> anyhow::Result<Option<String>> 
             |r| r.get(0),
         )
         .optional()?)
+}
+
+// ---- captured notifications ----
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Notification {
+    pub id: i64,
+    pub app: String,
+    pub source: String,
+    pub title: String,
+    pub body: String,
+    /// "pending" until triaged, then "urgent", "fyi", or "ignore".
+    pub category: String,
+    pub summary: Option<String>,
+    pub reason: Option<String>,
+    pub during_focus: bool,
+    pub seen: bool,
+    pub received_at: String,
+}
+
+const NOTIF_COLS: &str = "id, app, source, title, body, category, summary, reason, during_focus, seen, received_at";
+
+fn notif_row(r: &rusqlite::Row) -> rusqlite::Result<Notification> {
+    Ok(Notification {
+        id: r.get(0)?,
+        app: r.get(1)?,
+        source: r.get(2)?,
+        title: r.get(3)?,
+        body: r.get(4)?,
+        category: r.get(5)?,
+        summary: r.get(6)?,
+        reason: r.get(7)?,
+        during_focus: r.get::<_, i64>(8)? != 0,
+        seen: r.get::<_, i64>(9)? != 0,
+        received_at: r.get(10)?,
+    })
+}
+
+pub fn insert_notification(
+    conn: &Connection,
+    app: &str,
+    source: &str,
+    title: &str,
+    body: &str,
+    during_focus: bool,
+) -> anyhow::Result<i64> {
+    conn.execute(
+        "INSERT INTO notifications (app, source, title, body, during_focus, received_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![app, source, title, body, during_focus, now_ts()],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_notification(conn: &Connection, id: i64) -> anyhow::Result<Option<Notification>> {
+    Ok(conn
+        .query_row(&format!("SELECT {NOTIF_COLS} FROM notifications WHERE id = ?1"), params![id], notif_row)
+        .optional()?)
+}
+
+pub fn set_triage(conn: &Connection, id: i64, category: &str, summary: Option<&str>, reason: Option<&str>) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE notifications SET category = ?2, summary = COALESCE(?3, summary), reason = COALESCE(?4, reason) WHERE id = ?1",
+        params![id, category, summary, reason],
+    )?;
+    Ok(())
+}
+
+/// Newest first. `category` None means all; `since` filters by received time.
+pub fn list_notifications(
+    conn: &Connection,
+    category: Option<&str>,
+    since: Option<&str>,
+    limit: usize,
+) -> anyhow::Result<Vec<Notification>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {NOTIF_COLS} FROM notifications
+         WHERE (?1 IS NULL OR category = ?1) AND (?2 IS NULL OR received_at >= ?2)
+         ORDER BY id DESC LIMIT ?3"
+    ))?;
+    let rows = stmt.query_map(params![category, since, limit as i64], notif_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn pending_notifications(conn: &Connection) -> anyhow::Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM notifications WHERE category = 'pending' ORDER BY id")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn unseen_notification_count(conn: &Connection) -> anyhow::Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM notifications WHERE seen = 0 AND category IN ('urgent', 'fyi')",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
+pub fn mark_notifications_seen(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute("UPDATE notifications SET seen = 1 WHERE seen = 0", [])?;
+    Ok(())
+}
+
+/// Keeps the inbox from growing forever; notification text is personal data.
+pub fn prune_notifications(conn: &Connection, keep_days: u32) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM notifications WHERE received_at < datetime('now', 'localtime', ?1)",
+        params![format!("-{keep_days} days")],
+    )?;
+    Ok(())
 }
 
 // ---- settings (small key/value state) ----

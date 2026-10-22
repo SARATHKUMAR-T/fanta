@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, Persona } from "./api";
 import FocusBar from "./FocusBar";
+import Inbox from "./Inbox";
 import Tasks from "./Tasks";
 import "./App.css";
 
 type Msg = { role: "user" | "assistant" | "error"; content: string };
-type Tab = "chat" | "tasks";
+type Tab = "chat" | "tasks" | "inbox";
 
 export default function App() {
   const [persona, setPersona] = useState<Persona | null>(null);
@@ -16,6 +17,7 @@ export default function App() {
   const [toolNote, setToolNote] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("chat");
   const [openTasks, setOpenTasks] = useState(0);
+  const [unseen, setUnseen] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,8 +37,11 @@ export default function App() {
     const unProactive = listen<string>("chat://proactive", (e) =>
       setMessages((prev) => [...prev, { role: "assistant", content: e.payload }]),
     );
+    const refreshUnseen = () => api.inboxUnseen().then(setUnseen);
+    refreshUnseen();
+    const unInbox = listen("inbox://changed", refreshUnseen);
     return () => {
-      for (const un of [unToken, unTool, unProactive]) un.then((f) => f());
+      for (const un of [unToken, unTool, unProactive, unInbox]) un.then((f) => f());
     };
   }, []);
 
@@ -79,10 +84,17 @@ export default function App() {
         <button className={tab === "tasks" ? "active" : ""} onClick={() => setTab("tasks")}>
           Tasks{openTasks > 0 && <span className="badge">{openTasks}</span>}
         </button>
+        <button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}>
+          Inbox{unseen > 0 && <span className="badge">{unseen}</span>}
+        </button>
       </nav>
 
       <div className={tab === "tasks" ? "pane" : "pane hidden"}>
         <Tasks onCount={setOpenTasks} />
+      </div>
+
+      <div className={tab === "inbox" ? "pane" : "pane hidden"}>
+        <Inbox visible={tab === "inbox"} />
       </div>
 
       <div className={tab === "chat" ? "pane" : "pane hidden"}>

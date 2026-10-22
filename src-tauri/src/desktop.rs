@@ -3,8 +3,6 @@
 
 use rusqlite::Connection;
 use std::process::Command;
-use tauri::AppHandle;
-use tauri_plugin_notification::NotificationExt;
 
 use crate::db;
 
@@ -13,10 +11,24 @@ const DND_KEY: &str = "show-banners";
 /// Remembers the user's own banner setting while Fanta has DND switched on.
 const DND_PREV: &str = "dnd_prev_show_banners";
 
-pub fn notify(app: &AppHandle, title: &str, body: &str) {
-    if let Err(e) = app.notification().builder().title(title).body(body).show() {
-        eprintln!("notification failed: {e}");
-    }
+/// App name on Fanta's own notifications; the notification monitor skips these.
+pub const OWN_APP_NAME: &str = "Fanta";
+
+/// Shows a desktop notification. `urgent` uses critical urgency, which GNOME
+/// still displays while Do Not Disturb is on.
+pub fn notify(title: &str, body: &str, urgent: bool) {
+    let (title, body) = (title.to_string(), body.to_string());
+    // The D-Bus call blocks briefly; keep it off the async runtime.
+    std::thread::spawn(move || {
+        let mut n = notify_rust::Notification::new();
+        n.appname(OWN_APP_NAME).summary(&title).body(&body);
+        if urgent {
+            n.urgency(notify_rust::Urgency::Critical);
+        }
+        if let Err(e) = n.show() {
+            eprintln!("notification failed: {e}");
+        }
+    });
 }
 
 fn gsettings(args: &[&str]) -> Option<String> {

@@ -26,6 +26,19 @@ pomodoro:
   focus_minutes: 25
   break_minutes: 5
 
+# Notification hub: Fanta reads desktop notifications (Teams, Slack, mail...)
+# locally, sorts them into urgent / fyi / ignore, and holds non-urgent ones
+# back while you focus.
+notifications:
+  enabled: true
+  # People whose messages always break through focus. Match on sender name.
+  vip: []
+  # Words that make a message urgent without asking the model.
+  urgent_keywords: [urgent, asap, outage, incident, emergency, blocker, p1, sev1, prod down]
+  # Apps to ignore entirely, e.g. [Spotify, Rhythmbox].
+  muted_apps: []
+  keep_days: 14
+
 system_prompt: |
   You are Fanta, a calm, grounded productivity coach who lives on the user's
   Linux machine. You speak casually, like a supportive friend who keeps them
@@ -65,6 +78,30 @@ pub struct Pomodoro {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationConfig {
+    pub enabled: bool,
+    pub vip: Vec<String>,
+    pub urgent_keywords: Vec<String>,
+    pub muted_apps: Vec<String>,
+    pub keep_days: u32,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            vip: vec![],
+            urgent_keywords: ["urgent", "asap", "outage", "incident", "emergency", "blocker", "p1", "sev1", "prod down"]
+                .map(String::from)
+                .to_vec(),
+            muted_apps: vec![],
+            keep_days: 14,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Persona {
     pub name: String,
     pub tagline: String,
@@ -76,6 +113,8 @@ pub struct Persona {
     pub focus_dnd: bool,
     pub workday: Workday,
     pub pomodoro: Pomodoro,
+    #[serde(default)]
+    pub notifications: NotificationConfig,
     pub system_prompt: String,
 }
 
@@ -97,7 +136,9 @@ pub fn load() -> anyhow::Result<Persona> {
 const TOOL_GUIDE: &str = "You can manage the user's tasks, reminders, and focus (pomodoro) \
 sessions with your tools. When the user asks to be reminded, call set_reminder. When they want \
 to focus or start a pomodoro, call start_focus. Check list_tasks before answering questions about \
-their tasks. When the user says they finished something, call complete_task. After a tool runs, confirm in one short sentence.";
+their tasks. When the user says they finished something, call complete_task. \
+You also see their desktop notifications (Teams, Slack, mail...): use list_notifications when they ask \
+what they missed or about messages. After a tool runs, confirm in one short sentence.";
 
 impl Persona {
     /// Whether `now` falls inside the configured workday.

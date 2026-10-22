@@ -27,6 +27,22 @@ export type FocusStatus = {
   break_minutes: number;
 };
 
+export type Category = "urgent" | "fyi" | "ignore";
+
+export type InboxItem = {
+  id: number;
+  app: string;
+  source: string;
+  title: string;
+  body: string;
+  category: Category | "pending";
+  summary: string | null;
+  reason: string | null;
+  during_focus: boolean;
+  seen: boolean;
+  received_at: string;
+};
+
 export const api = {
   persona: () => invoke<Persona>("get_persona"),
   history: () => invoke<{ role: string; content: string }[]>("get_history"),
@@ -38,6 +54,11 @@ export const api = {
   focusStatus: () => invoke<FocusStatus>("focus_status"),
   startFocus: (minutes?: number, taskId?: number) => invoke<void>("start_focus", { minutes, taskId }),
   stopFocus: () => invoke<void>("stop_focus"),
+  listNotifications: (category?: Category) => invoke<InboxItem[]>("list_notifications", { category }),
+  inboxUnseen: () => invoke<number>("inbox_unseen"),
+  markInboxSeen: () => invoke<void>("mark_inbox_seen"),
+  setNotificationCategory: (id: number, category: Category) =>
+    invoke<void>("set_notification_category", { id, category }),
 };
 
 /** Backend timestamps are local "YYYY-MM-DD HH:MM:SS". */

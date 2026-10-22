@@ -2,6 +2,7 @@ mod db;
 mod desktop;
 mod focus;
 mod llm;
+mod notifications;
 mod persona;
 mod scheduler;
 mod tools;
@@ -133,6 +134,34 @@ fn stop_focus(app: AppHandle) -> Result<(), String> {
     focus::stop(&app).map(|_| ()).map_err(err)
 }
 
+#[tauri::command]
+fn list_notifications(state: State<'_, AppState>, category: Option<String>) -> Result<Vec<db::Notification>, String> {
+    db::list_notifications(&state.db.lock().unwrap(), category.as_deref(), None, 200).map_err(err)
+}
+
+#[tauri::command]
+fn inbox_unseen(state: State<'_, AppState>) -> Result<i64, String> {
+    db::unseen_notification_count(&state.db.lock().unwrap()).map_err(err)
+}
+
+#[tauri::command]
+fn mark_inbox_seen(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    db::mark_notifications_seen(&state.db.lock().unwrap()).map_err(err)?;
+    let _ = app.emit("inbox://changed", ());
+    Ok(())
+}
+
+/// Lets the user correct a triage decision. Kept for learning preferences later.
+#[tauri::command]
+fn set_notification_category(app: AppHandle, state: State<'_, AppState>, id: i64, category: String) -> Result<(), String> {
+    if !["urgent", "fyi", "ignore"].contains(&category.as_str()) {
+        return Err(format!("unknown category '{category}'"));
+    }
+    db::set_triage(&state.db.lock().unwrap(), id, &category, None, Some("set by you")).map_err(err)?;
+    let _ = app.emit("inbox://changed", ());
+    Ok(())
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -153,7 +182,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .manage(state)
         .setup(|app| {
             // If Fanta quit mid-focus, don't leave the user stuck in Do Not Disturb.
@@ -163,8 +191,10 @@ pub fn run() {
                 if db::active_session(&conn)?.is_none() {
                     desktop::dnd_off(&conn);
                 }
+                db::prune_notifications(&conn, state.persona.notifications.keep_days)?;
             }
             scheduler::spawn(app.handle().clone());
+            notifications::spawn(app.handle().clone());
 
             let show = MenuItem::with_id(app, "show", "Open Fanta", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -207,7 +237,11 @@ pub fn run() {
             delete_task,
             focus_status,
             start_focus,
-            stop_focus
+            stop_focus,
+            list_notifications,
+            inbox_unseen,
+            mark_inbox_seen,
+            set_notification_category
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

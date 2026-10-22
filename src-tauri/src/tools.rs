@@ -98,6 +98,18 @@ impl Registry {
                     |app, _| Ok(if focus::stop(app)? { "Stopped." } else { "Nothing was running." }.into()),
                 ),
                 tool(
+                    "list_notifications",
+                    "List desktop notifications Fanta captured (Teams, Slack, mail...), newest first, with Fanta's triage. Use for 'what did I miss?'.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "category": { "type": "string", "enum": ["urgent", "fyi", "ignore", "all"], "description": "Default: urgent and fyi" },
+                            "since_minutes": { "type": "integer", "description": "How far back to look. Default 240." }
+                        }
+                    }),
+                    list_notifications,
+                ),
+                tool(
                     "focus_status",
                     "Check whether a focus block or break is running, and how many blocks were done today.",
                     json!({ "type": "object", "properties": {} }),
@@ -267,6 +279,33 @@ fn start_focus(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
     let s = focus::start(app, minutes, task.as_ref().map(|t| t.id))?;
     let on = task.map(|t| format!(" on '{}'", t.title)).unwrap_or_default();
     Ok(format!("Focus block started{on}, ends at {}. Do Not Disturb is on.", friendly(&s.ends_at)))
+}
+
+fn list_notifications(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    let minutes = arg_i64(args, "since_minutes").filter(|m| *m > 0).unwrap_or(240);
+    let since = (Local::now() - Duration::minutes(minutes)).format(db::TS).to_string();
+    let category = arg_str(args, "category").unwrap_or("default");
+    let items = db::list_notifications(
+        &app.state::<AppState>().db.lock().unwrap(),
+        matches!(category, "urgent" | "fyi" | "ignore").then_some(category),
+        Some(&since),
+        40,
+    )?;
+    let items: Vec<_> = items
+        .into_iter()
+        .filter(|n| category != "default" || n.category == "urgent" || n.category == "fyi")
+        .collect();
+    if items.is_empty() {
+        return Ok(format!("No matching notifications in the last {minutes} minutes."));
+    }
+    Ok(items
+        .iter()
+        .map(|n| {
+            let what = n.summary.clone().unwrap_or_else(|| format!("{}: {}", n.title, n.body.chars().take(140).collect::<String>()));
+            format!("[{}] {} {} · {}", n.category, friendly(&n.received_at), n.source, what)
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 fn focus_status(app: &AppHandle, _: &Value) -> anyhow::Result<String> {

@@ -37,12 +37,13 @@ pub fn spawn(app: AppHandle) {
     });
 }
 
-/// Posts a message from Fanta into the chat (and as a desktop notification).
-fn post(app: &AppHandle, content: &str) -> anyhow::Result<()> {
+/// Posts a message from Fanta into the chat and as a desktop notification.
+/// `urgent` notifications show even during Do Not Disturb.
+pub fn post(app: &AppHandle, content: &str, urgent: bool) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
     db::insert_message(&state.db.lock().unwrap(), "assistant", content)?;
     let _ = app.emit("chat://proactive", content);
-    desktop::notify(app, &state.persona.name, content);
+    desktop::notify(&state.persona.name, content, urgent);
     Ok(())
 }
 
@@ -50,7 +51,8 @@ fn fire_reminders(app: &AppHandle) -> anyhow::Result<()> {
     let due = db::due_reminders(&app.state::<AppState>().db.lock().unwrap())?;
     for task in due {
         db::mark_reminded(&app.state::<AppState>().db.lock().unwrap(), task.id)?;
-        post(app, &format!("⏰ Reminder: {}", task.title))?;
+        // The user asked for this one, so it breaks through focus mode.
+        post(app, &format!("⏰ Reminder: {}", task.title), true)?;
     }
     Ok(())
 }
@@ -99,15 +101,16 @@ async fn proactive(app: &AppHandle) -> anyhow::Result<()> {
 
     if let Some(instruction) = instruction {
         SPEAKING.store(true, Ordering::SeqCst);
-        let result = speak(app, instruction).await;
+        let result = speak(app, "", instruction).await;
         SPEAKING.store(false, Ordering::SeqCst);
-        post(app, &result?)?;
+        post(app, &result?, false)?;
     }
     Ok(())
 }
 
 /// Asks the model for a short proactive message in Fanta's voice.
-async fn speak(app: &AppHandle, instruction: &str) -> anyhow::Result<String> {
+/// `extra` is added to the task context the model sees.
+pub async fn speak(app: &AppHandle, extra: &str, instruction: &str) -> anyhow::Result<String> {
     let state = app.state::<AppState>();
     let context = {
         let conn = state.db.lock().unwrap();
@@ -125,7 +128,7 @@ async fn speak(app: &AppHandle, instruction: &str) -> anyhow::Result<String> {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        format!("Open tasks:\n{list}\nFocus blocks done today: {}", db::focus_blocks_today(&conn)?)
+        format!("Open tasks:\n{list}\nFocus blocks done today: {}\n{extra}", db::focus_blocks_today(&conn)?)
     };
     let messages = vec![
         Message::new("system", state.persona.full_system_prompt()),

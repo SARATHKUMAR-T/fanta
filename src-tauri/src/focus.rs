@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{db, desktop, AppState};
+use crate::{db, desktop, notifications, AppState};
 
 #[derive(Serialize)]
 pub struct FocusStatus {
@@ -59,6 +59,9 @@ pub fn stop(app: &AppHandle) -> anyhow::Result<bool> {
         match db::active_session(&conn)? {
             Some(s) => {
                 db::end_session(&conn, s.id, false)?;
+                if s.kind == "focus" {
+                    notifications::spawn_digest(app.clone(), s.started_at);
+                }
                 true
             }
             None => false,
@@ -80,6 +83,7 @@ pub fn tick(app: &AppHandle) -> anyhow::Result<()> {
                 if s.kind == "focus" {
                     desktop::dnd_off(&conn);
                     db::start_session(&conn, "break", p.pomodoro.break_minutes, s.task_id)?;
+                    notifications::spawn_digest(app.clone(), s.started_at.clone());
                 }
                 Some(s.kind)
             }
@@ -88,11 +92,11 @@ pub fn tick(app: &AppHandle) -> anyhow::Result<()> {
     };
     match finished.as_deref() {
         Some("focus") => desktop::notify(
-            app,
             &p.name,
             &format!("Focus block done - nice. Take {} minutes, stretch, get some water.", p.pomodoro.break_minutes),
+            false,
         ),
-        Some(_) => desktop::notify(app, &p.name, "Break's over. Ready for another round when you are."),
+        Some(_) => desktop::notify(&p.name, "Break's over. Ready for another round when you are.", false),
         None => return Ok(()),
     }
     let _ = app.emit("focus://changed", ());

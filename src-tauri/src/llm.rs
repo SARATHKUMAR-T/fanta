@@ -105,4 +105,25 @@ impl Ollama {
         }
         Ok(out)
     }
+
+    /// One non-streaming call constrained to a JSON schema (Ollama structured outputs).
+    pub async fn complete_json(&self, model: &str, messages: &[Message], schema: &Value) -> anyhow::Result<Value> {
+        let body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "format": schema,
+            "stream": false,
+            "options": { "temperature": 0 },
+        });
+        let resp = self
+            .http
+            .post(format!("{}/api/chat", self.base_url))
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+        let chunk: Chunk = resp.json().await?;
+        let content = chunk.message.map(|m| m.content).unwrap_or_default();
+        Ok(serde_json::from_str(&content)?)
+    }
 }
