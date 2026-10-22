@@ -2,6 +2,19 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, FocusStatus, parseTs } from "./api";
 
+const NOTE_EVENT = "fanta:focus-note";
+
+/** Starts focus and surfaces "shortened for a meeting" notes or refusals in the focus bar. */
+export async function startFocus(minutes?: number, taskId?: number) {
+  let note: string | null;
+  try {
+    note = await api.startFocus(minutes, taskId);
+  } catch (e) {
+    note = String(e);
+  }
+  if (note) window.dispatchEvent(new CustomEvent(NOTE_EVENT, { detail: note }));
+}
+
 function mmss(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -10,6 +23,21 @@ function mmss(ms: number) {
 export default function FocusBar() {
   const [status, setStatus] = useState<FocusStatus | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const onNote = (e: Event) => {
+      setNote((e as CustomEvent<string>).detail);
+      clearTimeout(timer);
+      timer = window.setTimeout(() => setNote(null), 8000);
+    };
+    window.addEventListener(NOTE_EVENT, onNote);
+    return () => {
+      window.removeEventListener(NOTE_EVENT, onNote);
+      clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const refresh = () => api.focusStatus().then(setStatus);
@@ -24,18 +52,22 @@ export default function FocusBar() {
 
   if (!status) return null;
   const s = status.active;
+  const noteLine = note && <div className="focus-note">{note}</div>;
 
   if (!s) {
     return (
-      <div className="focusbar idle">
-        <button className="primary" onClick={() => api.startFocus()}>
-          Start focus · {status.focus_minutes} min
-        </button>
-        <span className="muted">
-          {status.blocks_today === 0
-            ? "no focus blocks yet today"
-            : `${status.blocks_today} block${status.blocks_today > 1 ? "s" : ""} today`}
-        </span>
+      <div className="focusbar">
+        <div className="focus-idle">
+          <button className="primary" onClick={() => startFocus()}>
+            Start focus · {status.focus_minutes} min
+          </button>
+          <span className="muted">
+            {status.blocks_today === 0
+              ? "no focus blocks yet today"
+              : `${status.blocks_today} block${status.blocks_today > 1 ? "s" : ""} today`}
+          </span>
+        </div>
+        {noteLine}
       </div>
     );
   }
@@ -62,6 +94,7 @@ export default function FocusBar() {
       <div className="progress">
         <div style={{ width: `${progress * 100}%` }} />
       </div>
+      {noteLine}
     </div>
   );
 }

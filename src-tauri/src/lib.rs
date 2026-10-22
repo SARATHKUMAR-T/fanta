@@ -1,3 +1,5 @@
+mod approvals;
+mod calendar;
 mod db;
 mod desktop;
 mod focus;
@@ -24,6 +26,8 @@ pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub ollama: Ollama,
     pub tools: tools::Registry,
+    pub calendar: calendar::Calendar,
+    pub approvals: approvals::Approvals,
 }
 
 #[tauri::command]
@@ -40,6 +44,8 @@ fn get_history(state: State<'_, AppState>) -> Result<Vec<db::StoredMessage>, Str
 #[tauri::command]
 async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<String, String> {
     let mut messages = vec![];
+    // Takes the db lock itself, so it must run before we hold it below.
+    let meetings = calendar::today_summary(&app);
     {
         let conn = state.db.lock().unwrap();
         // Open tasks go last in the system prompt so the stable prefix stays cacheable.
@@ -52,7 +58,7 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         let tasks = if open.is_empty() { "(none)".to_string() } else { open.join("\n") };
         messages.push(Message::new(
             "system",
-            format!("{}\nOpen tasks:\n{tasks}", state.persona.full_system_prompt()),
+            format!("{}\nOpen tasks:\n{tasks}\n{meetings}", state.persona.full_system_prompt()),
         ));
         let history = db::recent_messages(&conn, HISTORY_LIMIT).map_err(|e| e.to_string())?;
         messages.extend(history.into_iter().map(|m| Message::new(&m.role, m.content)));
@@ -79,8 +85,23 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         let calls = reply.tool_calls.clone();
         messages.push(reply);
         for call in calls {
-            let _ = app.emit("chat://tool", &call.function.name);
-            let result = state.tools.call(&app, &call.function.name, &call.function.arguments);
+            let (name, args) = (&call.function.name, &call.function.arguments);
+            let result = match state.tools.approval(&app, name, args) {
+                Some(Err(e)) => format!("error: {e}"),
+                Some(Ok(description)) => {
+                    let _ = app.emit("chat://tool", "waiting for your approval");
+                    if approvals::ask(&app, name, &description).await {
+                        let _ = app.emit("chat://tool", name);
+                        state.tools.call(&app, name, args).await
+                    } else {
+                        "The user declined this action. Acknowledge briefly; don't retry unless they ask.".into()
+                    }
+                }
+                None => {
+                    let _ = app.emit("chat://tool", name);
+                    state.tools.call(&app, name, args).await
+                }
+            };
             let mut msg = Message::new("tool", result);
             msg.tool_name = Some(call.function.name);
             messages.push(msg);
@@ -125,8 +146,9 @@ fn focus_status(app: AppHandle) -> Result<focus::FocusStatus, String> {
 }
 
 #[tauri::command]
-fn start_focus(app: AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> Result<(), String> {
-    focus::start(&app, minutes, task_id).map(|_| ()).map_err(err)
+/// Returns a note if the block was shortened for a meeting.
+fn start_focus(app: AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> Result<Option<String>, String> {
+    focus::start(&app, minutes, task_id).map(|(_, note)| note).map_err(err)
 }
 
 #[tauri::command]
@@ -162,6 +184,54 @@ fn set_notification_category(app: AppHandle, state: State<'_, AppState>, id: i64
     Ok(())
 }
 
+#[tauri::command]
+fn answer_approval(app: AppHandle, id: u64, approved: bool) {
+    approvals::answer(&app, id, approved);
+}
+
+#[tauri::command]
+fn calendar_status(app: AppHandle) -> calendar::Status {
+    calendar::status(&app)
+}
+
+#[tauri::command]
+async fn calendar_sign_in(app: AppHandle, client_id: String, tenant: String) -> Result<calendar::graph::DeviceCode, String> {
+    if client_id.trim().is_empty() {
+        return Err("Enter the Application (client) ID first.".into());
+    }
+    calendar::begin_graph_sign_in(&app, &client_id, &tenant).await.map_err(err)
+}
+
+#[tauri::command]
+async fn calendar_connect_ics(app: AppHandle, url: String) -> Result<usize, String> {
+    calendar::connect_ics(&app, &url).await.map_err(err)
+}
+
+#[tauri::command]
+fn calendar_disconnect(app: AppHandle) -> Result<(), String> {
+    calendar::disconnect(&app).map_err(err)
+}
+
+#[tauri::command]
+fn calendar_sync(app: AppHandle) {
+    calendar::request_sync(&app);
+}
+
+/// Events overlapping the local-time range [from, to).
+#[tauri::command]
+fn calendar_events(state: State<'_, AppState>, from: String, to: String) -> Result<Vec<db::CalEvent>, String> {
+    db::events_between(&state.db.lock().unwrap(), &from, &to).map_err(err)
+}
+
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("only https links can be opened".into());
+    }
+    desktop::open_url(&url);
+    Ok(())
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -177,6 +247,8 @@ pub fn run() {
         ollama: Ollama::new(&persona.ollama_url),
         db: Mutex::new(db::open().expect("failed to open database")),
         tools: tools::Registry::with_builtins(),
+        calendar: calendar::Calendar::default(),
+        approvals: approvals::Approvals::default(),
         persona,
     };
 
@@ -195,6 +267,7 @@ pub fn run() {
             }
             scheduler::spawn(app.handle().clone());
             notifications::spawn(app.handle().clone());
+            calendar::spawn(app.handle().clone());
 
             let show = MenuItem::with_id(app, "show", "Open Fanta", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -241,7 +314,15 @@ pub fn run() {
             list_notifications,
             inbox_unseen,
             mark_inbox_seen,
-            set_notification_category
+            set_notification_category,
+            answer_approval,
+            calendar_status,
+            calendar_sign_in,
+            calendar_connect_ics,
+            calendar_disconnect,
+            calendar_sync,
+            calendar_events,
+            open_link
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

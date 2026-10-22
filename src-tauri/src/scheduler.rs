@@ -7,7 +7,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::llm::Message;
-use crate::{db, desktop, focus, AppState};
+use crate::{calendar, db, desktop, focus, AppState};
 
 const TICK: Duration = Duration::from_secs(15);
 /// Nudge after this long without a focus block (and no more often than this).
@@ -28,6 +28,9 @@ pub fn spawn(app: AppHandle) {
             }
             if let Err(e) = focus::tick(&app) {
                 eprintln!("focus: {e}");
+            }
+            if let Err(e) = calendar::heads_up(&app) {
+                eprintln!("calendar heads-up: {e}");
             }
             if let Err(e) = proactive(&app).await {
                 eprintln!("proactive: {e}");
@@ -69,6 +72,9 @@ async fn proactive(app: &AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     let today = now.format("%Y-%m-%d").to_string();
+    // These take the db lock, so gather them first.
+    let meetings = calendar::today_summary(app);
+    let meeting_soon = calendar::in_meeting_now(app).is_some() || calendar::next_meeting_within(app, 20).is_some();
 
     let instruction = {
         let conn = state.db.lock().unwrap();
@@ -76,8 +82,9 @@ async fn proactive(app: &AppHandle) -> anyhow::Result<()> {
             db::set_setting(&conn, LAST_BRIEF, &today)?;
             db::set_setting(&conn, LAST_NUDGE, &db::now_ts())?;
             Some("This is your first check-in with the user today. Give a short, warm brief: \
-                  greet them in a way that fits the current time of day, mention the most important open tasks and any deadlines or \
-                  reminders today, and suggest what to focus on first. 2-4 sentences.")
+                  greet them in a way that fits the current time of day, mention their meetings \
+                  (if any), the most important open tasks and any deadlines or reminders today, \
+                  and suggest what to focus on first, fitting around meetings. 2-4 sentences.")
         } else {
             let idle_ok = desktop::idle_ms().map_or(true, |ms| ms < MAX_IDLE_MS);
             let running = db::active_session(&conn)?.is_some();
@@ -88,7 +95,7 @@ async fn proactive(app: &AppHandle) -> anyhow::Result<()> {
             let since_nudge = db::get_setting(&conn, LAST_NUDGE)?
                 .and_then(|t| minutes_since(&t))
                 .unwrap_or(i64::MAX);
-            if idle_ok && !running && has_tasks && since_focus >= NUDGE_AFTER_MIN && since_nudge >= NUDGE_AFTER_MIN {
+            if idle_ok && !running && !meeting_soon && has_tasks && since_focus >= NUDGE_AFTER_MIN && since_nudge >= NUDGE_AFTER_MIN {
                 db::set_setting(&conn, LAST_NUDGE, &db::now_ts())?;
                 Some("The user hasn't done a focus block in a while and has open tasks. \
                       Gently nudge them back on track: suggest one specific task and offer \
@@ -101,7 +108,7 @@ async fn proactive(app: &AppHandle) -> anyhow::Result<()> {
 
     if let Some(instruction) = instruction {
         SPEAKING.store(true, Ordering::SeqCst);
-        let result = speak(app, "", instruction).await;
+        let result = speak(app, &meetings, instruction).await;
         SPEAKING.store(false, Ordering::SeqCst);
         post(app, &result?, false)?;
     }

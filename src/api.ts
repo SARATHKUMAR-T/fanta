@@ -43,6 +43,38 @@ export type InboxItem = {
   received_at: string;
 };
 
+export type CalEvent = {
+  num: number;
+  subject: string;
+  start_at: string;
+  end_at: string;
+  all_day: boolean;
+  location: string | null;
+  join_url: string | null;
+  organizer: string | null;
+  response: string | null;
+  show_as: string | null;
+};
+
+export type CalendarStatus = {
+  provider: "none" | "graph" | "ics";
+  account: string | null;
+  last_sync: string | null;
+  error: string | null;
+  can_write: boolean;
+  client_id: string | null;
+  tenant: string | null;
+};
+
+export type DeviceCode = {
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  message: string;
+};
+
+export type ApprovalRequest = { id: number; tool: string; text: string };
+
 export const api = {
   persona: () => invoke<Persona>("get_persona"),
   history: () => invoke<{ role: string; content: string }[]>("get_history"),
@@ -52,14 +84,33 @@ export const api = {
   setTaskDone: (id: number, done: boolean) => invoke<void>("set_task_done", { id, done }),
   deleteTask: (id: number) => invoke<void>("delete_task", { id }),
   focusStatus: () => invoke<FocusStatus>("focus_status"),
-  startFocus: (minutes?: number, taskId?: number) => invoke<void>("start_focus", { minutes, taskId }),
+  /** Resolves to a note when the block was shortened for a meeting. */
+  startFocus: (minutes?: number, taskId?: number) => invoke<string | null>("start_focus", { minutes, taskId }),
   stopFocus: () => invoke<void>("stop_focus"),
   listNotifications: (category?: Category) => invoke<InboxItem[]>("list_notifications", { category }),
   inboxUnseen: () => invoke<number>("inbox_unseen"),
   markInboxSeen: () => invoke<void>("mark_inbox_seen"),
   setNotificationCategory: (id: number, category: Category) =>
     invoke<void>("set_notification_category", { id, category }),
+  answerApproval: (id: number, approved: boolean) => invoke<void>("answer_approval", { id, approved }),
+  calendarStatus: () => invoke<CalendarStatus>("calendar_status"),
+  calendarSignIn: (clientId: string, tenant: string) => invoke<DeviceCode>("calendar_sign_in", { clientId, tenant }),
+  calendarConnectIcs: (url: string) => invoke<number>("calendar_connect_ics", { url }),
+  calendarDisconnect: () => invoke<void>("calendar_disconnect"),
+  calendarSync: () => invoke<void>("calendar_sync"),
+  calendarEvents: (from: string, to: string) => invoke<CalEvent[]>("calendar_events", { from, to }),
+  openLink: (url: string) => invoke<void>("open_link", { url }),
 };
+
+/** Local "YYYY-MM-DD HH:MM:SS" for a Date, matching the backend. */
+export function toTs(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+export function hm(ts: string): string {
+  return parseTs(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 /** Backend timestamps are local "YYYY-MM-DD HH:MM:SS". */
 export function parseTs(ts: string): Date {

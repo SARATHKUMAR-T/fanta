@@ -17,18 +17,42 @@ pub const OWN_APP_NAME: &str = "Fanta";
 /// Shows a desktop notification. `urgent` uses critical urgency, which GNOME
 /// still displays while Do Not Disturb is on.
 pub fn notify(title: &str, body: &str, urgent: bool) {
-    let (title, body) = (title.to_string(), body.to_string());
-    // The D-Bus call blocks briefly; keep it off the async runtime.
+    notify_with_link(title, body, urgent, None);
+}
+
+/// Like `notify`, with a "Join" button (and click) that opens `link`.
+pub fn notify_with_link(title: &str, body: &str, urgent: bool, link: Option<&str>) {
+    let (title, body, link) = (title.to_string(), body.to_string(), link.map(str::to_string));
+    // The D-Bus calls block (waiting for a click blocks until dismissal); keep them off the async runtime.
     std::thread::spawn(move || {
         let mut n = notify_rust::Notification::new();
         n.appname(OWN_APP_NAME).summary(&title).body(&body);
         if urgent {
             n.urgency(notify_rust::Urgency::Critical);
         }
-        if let Err(e) = n.show() {
-            eprintln!("notification failed: {e}");
+        if link.is_some() {
+            n.action("default", "Join");
+            n.action("join", "Join");
+        }
+        match n.show() {
+            Ok(handle) => {
+                if let Some(url) = link {
+                    handle.wait_for_action(|action| {
+                        if action == "join" || action == "default" {
+                            open_url(&url);
+                        }
+                    });
+                }
+            }
+            Err(e) => eprintln!("notification failed: {e}"),
         }
     });
+}
+
+pub fn open_url(url: &str) {
+    if let Err(e) = Command::new("xdg-open").arg(url).spawn() {
+        eprintln!("couldn't open {url}: {e}");
+    }
 }
 
 fn gsettings(args: &[&str]) -> Option<String> {

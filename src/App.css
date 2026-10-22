@@ -69,7 +69,8 @@ header p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
 /* ---- focus bar ---- */
 .muted { color: var(--muted); font-size: 13px; }
 .focusbar { padding: 10px 16px; border-bottom: 1px solid var(--border); }
-.focusbar.idle { display: flex; align-items: center; gap: 12px; }
+.focus-idle { display: flex; align-items: center; gap: 12px; }
+.focus-note { margin-top: 6px; font-size: 13px; color: var(--muted); }
 .focusbar.focus { background: var(--accent-soft); }
 .focus-row { display: flex; align-items: center; justify-content: space-between; }
 .focus-label { font-size: 13px; font-weight: 600; }
@@ -154,3 +155,65 @@ select.cat {
   border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
 }
 select.cat.urgent { color: #d0533f; font-weight: 600; }
+
+/* ---- header actions ---- */
+.header-text { flex: 1; }
+.icon-btn {
+  width: 34px; height: 34px; border-radius: 9px; border: 0; background: none;
+  color: var(--muted); font-size: 18px; cursor: pointer;
+}
+.icon-btn:hover { background: var(--border); color: var(--text); }
+.small { font-size: 12.5px; }
+.row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.error-text { color: #c4432f; font-size: 13px; }
+.ok-text { color: #3f8a64; font-size: 13px; }
+.chip.ok { background: #d8efe2; color: #2f6e4e; }
+.bubble a { color: inherit; font-weight: 600; }
+
+/* ---- connections ---- */
+.connections { flex: 1; overflow-y: auto; padding: 14px 16px; }
+.conn-head { display: flex; align-items: center; justify-content: space-between; }
+.conn-head h2 { margin: 0; font-size: 17px; }
+.card { margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+.card p { margin: 6px 0; }
+.card h3 { margin: 16px 0 2px; font-size: 14px; }
+.card h3:first-of-type { margin-top: 8px; }
+.card-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; }
+.card label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.card input {
+  padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; outline: none;
+}
+.card input:focus { border-color: var(--accent); }
+.guide { margin: 10px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.55; }
+.device-code .code {
+  margin: 10px 0; font-size: 28px; font-weight: 700; letter-spacing: 3px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; text-align: center;
+  padding: 12px; border-radius: 10px; background: var(--accent-soft);
+}
+button.primary:disabled { opacity: 0.45; cursor: default; }
+
+/* ---- calendar ---- */
+.calendar { flex: 1; overflow-y: auto; padding: 8px 16px 16px; }
+.calendar .empty { padding: 40px 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.day h3 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+.day ul { list-style: none; margin: 0; padding: 0; }
+.event {
+  display: flex; align-items: center; gap: 12px; padding: 9px 10px; margin-bottom: 6px;
+  border-radius: 10px; background: var(--surface); border: 1px solid var(--border);
+}
+.event.live { border-color: var(--accent); background: var(--accent-soft); }
+.event.past, .event.declined { opacity: 0.55; }
+.event.declined .event-title { text-decoration: line-through; }
+.event-time { width: 92px; flex-shrink: 0; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.event-body { flex: 1; min-width: 0; }
+.event-title { font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---- approval cards ---- */
+.approval {
+  align-self: stretch; padding: 11px 13px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--accent);
+}
+.approval.approved { border-color: #4f9d7a; }
+.approval.declined { border-color: var(--border); opacity: 0.7; }
+.approval-label { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 3px; }

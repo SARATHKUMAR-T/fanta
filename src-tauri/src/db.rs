@@ -84,6 +84,23 @@ pub fn open() -> anyhow::Result<Connection> {
             received_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
         CREATE INDEX IF NOT EXISTS notifications_received ON notifications (received_at);
+        CREATE TABLE IF NOT EXISTS calendar_events (
+            num INTEGER PRIMARY KEY AUTOINCREMENT,
+            remote_id TEXT NOT NULL UNIQUE,
+            subject TEXT NOT NULL,
+            start_at TEXT NOT NULL,
+            end_at TEXT NOT NULL,
+            all_day INTEGER NOT NULL DEFAULT 0,
+            location TEXT,
+            join_url TEXT,
+            organizer TEXT,
+            response TEXT,
+            show_as TEXT,
+            cancelled INTEGER NOT NULL DEFAULT 0,
+            notified INTEGER NOT NULL DEFAULT 0,
+            sync_id TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS calendar_events_start ON calendar_events (start_at);
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -344,6 +361,151 @@ pub fn prune_notifications(conn: &Connection, keep_days: u32) -> anyhow::Result<
         "DELETE FROM notifications WHERE received_at < datetime('now', 'localtime', ?1)",
         params![format!("-{keep_days} days")],
     )?;
+    Ok(())
+}
+
+// ---- calendar cache ----
+
+/// An event as fetched from the provider (times already converted to local `TS`).
+#[derive(Debug, Clone, Default)]
+pub struct NewCalEvent {
+    pub remote_id: String,
+    pub subject: String,
+    pub start_at: String,
+    pub end_at: String,
+    pub all_day: bool,
+    pub location: Option<String>,
+    pub join_url: Option<String>,
+    pub organizer: Option<String>,
+    pub response: Option<String>,
+    pub show_as: Option<String>,
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CalEvent {
+    /// Short local id the chat can refer to.
+    pub num: i64,
+    pub remote_id: String,
+    pub subject: String,
+    pub start_at: String,
+    pub end_at: String,
+    pub all_day: bool,
+    pub location: Option<String>,
+    pub join_url: Option<String>,
+    pub organizer: Option<String>,
+    pub response: Option<String>,
+    pub show_as: Option<String>,
+    pub cancelled: bool,
+}
+
+const CAL_COLS: &str =
+    "num, remote_id, subject, start_at, end_at, all_day, location, join_url, organizer, response, show_as, cancelled";
+
+/// Events that actually block the user's time.
+const BUSY: &str = "all_day = 0 AND cancelled = 0 AND COALESCE(response, '') != 'declined' AND COALESCE(show_as, '') != 'free'";
+
+fn cal_row(r: &rusqlite::Row) -> rusqlite::Result<CalEvent> {
+    Ok(CalEvent {
+        num: r.get(0)?,
+        remote_id: r.get(1)?,
+        subject: r.get(2)?,
+        start_at: r.get(3)?,
+        end_at: r.get(4)?,
+        all_day: r.get::<_, i64>(5)? != 0,
+        location: r.get(6)?,
+        join_url: r.get(7)?,
+        organizer: r.get(8)?,
+        response: r.get(9)?,
+        show_as: r.get(10)?,
+        cancelled: r.get::<_, i64>(11)? != 0,
+    })
+}
+
+fn upsert_event(conn: &Connection, e: &NewCalEvent, sync_id: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO calendar_events
+           (remote_id, subject, start_at, end_at, all_day, location, join_url, organizer, response, show_as, cancelled, sync_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ON CONFLICT(remote_id) DO UPDATE SET
+           subject = excluded.subject, end_at = excluded.end_at, all_day = excluded.all_day,
+           location = excluded.location, join_url = excluded.join_url, organizer = excluded.organizer,
+           response = excluded.response, show_as = excluded.show_as, cancelled = excluded.cancelled,
+           notified = CASE WHEN start_at = excluded.start_at THEN notified ELSE 0 END,
+           start_at = excluded.start_at, sync_id = excluded.sync_id",
+        params![
+            e.remote_id, e.subject, e.start_at, e.end_at, e.all_day, e.location, e.join_url,
+            e.organizer, e.response, e.show_as, e.cancelled, sync_id
+        ],
+    )?;
+    Ok(())
+}
+
+/// Replaces the cache with a fresh sync, keeping local ids and heads-up state
+/// for events that didn't move.
+pub fn replace_calendar(conn: &mut Connection, events: &[NewCalEvent]) -> anyhow::Result<()> {
+    let sync_id = now_ts();
+    let tx = conn.transaction()?;
+    for e in events {
+        upsert_event(&tx, e, &sync_id)?;
+    }
+    tx.execute("DELETE FROM calendar_events WHERE sync_id != ?1", params![sync_id])?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Adds one event (e.g. one Fanta just created) without waiting for a sync.
+pub fn add_event(conn: &Connection, e: &NewCalEvent) -> anyhow::Result<CalEvent> {
+    upsert_event(conn, e, &now_ts())?;
+    Ok(conn.query_row(
+        &format!("SELECT {CAL_COLS} FROM calendar_events WHERE remote_id = ?1"),
+        params![e.remote_id],
+        cal_row,
+    )?)
+}
+
+pub fn clear_calendar(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute("DELETE FROM calendar_events", [])?;
+    Ok(())
+}
+
+/// Non-cancelled events overlapping [from, to), in start order.
+pub fn events_between(conn: &Connection, from: &str, to: &str) -> anyhow::Result<Vec<CalEvent>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CAL_COLS} FROM calendar_events
+         WHERE cancelled = 0 AND start_at < ?2 AND end_at > ?1 ORDER BY all_day DESC, start_at"
+    ))?;
+    let rows = stmt.query_map(params![from, to], cal_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Busy (non-declined, non-free, timed) events overlapping [from, to).
+pub fn busy_between(conn: &Connection, from: &str, to: &str) -> anyhow::Result<Vec<CalEvent>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CAL_COLS} FROM calendar_events WHERE {BUSY} AND start_at < ?2 AND end_at > ?1 ORDER BY start_at"
+    ))?;
+    let rows = stmt.query_map(params![from, to], cal_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn get_event(conn: &Connection, num: i64) -> anyhow::Result<Option<CalEvent>> {
+    Ok(conn
+        .query_row(&format!("SELECT {CAL_COLS} FROM calendar_events WHERE num = ?1"), params![num], cal_row)
+        .optional()?)
+}
+
+/// Busy events starting in [from, to) that haven't had a heads-up yet.
+pub fn due_heads_up(conn: &Connection, from: &str, to: &str) -> anyhow::Result<Vec<CalEvent>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CAL_COLS} FROM calendar_events
+         WHERE {BUSY} AND notified = 0 AND start_at >= ?1 AND start_at < ?2 ORDER BY start_at"
+    ))?;
+    let rows = stmt.query_map(params![from, to], cal_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn mark_event_notified(conn: &Connection, num: i64) -> anyhow::Result<()> {
+    conn.execute("UPDATE calendar_events SET notified = 1 WHERE num = ?1", params![num])?;
     Ok(())
 }
 

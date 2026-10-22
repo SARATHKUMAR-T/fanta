@@ -1,27 +1,49 @@
 //! Tool registry. Each tool is a JSON-schema description plus a handler.
 //! Phase 3 bridges MCP plugins in alongside these built-ins.
 
-use chrono::{Duration, Local, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime};
+use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::calendar::{self, graph::NewMeeting};
 use crate::{db, focus, AppState};
 
-type Handler = fn(&AppHandle, &Value) -> anyhow::Result<String>;
+type SyncHandler = fn(&AppHandle, &Value) -> anyhow::Result<String>;
+type AsyncHandler = fn(AppHandle, Value) -> BoxFuture<'static, anyhow::Result<String>>;
+/// Validates the arguments and describes the action for the approval card.
+type Approval = fn(&AppHandle, &Value) -> anyhow::Result<String>;
+
+pub enum Handler {
+    Sync(SyncHandler),
+    Async(AsyncHandler),
+}
 
 pub struct Tool {
     pub name: &'static str,
     pub description: &'static str,
     pub parameters: Value,
     pub handler: Handler,
+    /// Set for actions with side effects outside Fanta; the user must approve each call.
+    pub approval: Option<Approval>,
 }
 
 pub struct Registry {
     tools: Vec<Tool>,
 }
 
-fn tool(name: &'static str, description: &'static str, parameters: Value, handler: Handler) -> Tool {
-    Tool { name, description, parameters, handler }
+fn tool(name: &'static str, description: &'static str, parameters: Value, handler: SyncHandler) -> Tool {
+    Tool { name, description, parameters, handler: Handler::Sync(handler), approval: None }
+}
+
+fn async_tool(
+    name: &'static str,
+    description: &'static str,
+    parameters: Value,
+    handler: AsyncHandler,
+    approval: Option<Approval>,
+) -> Tool {
+    Tool { name, description, parameters, handler: Handler::Async(handler), approval }
 }
 
 impl Registry {
@@ -48,7 +70,7 @@ impl Registry {
                         "type": "object",
                         "properties": {
                             "title": { "type": "string" },
-                            "due": { "type": "string", "description": "Optional deadline, 'YYYY-MM-DD HH:MM' or 'HH:MM'" }
+                            "due": { "type": "string", "description": "Optional deadline, local 'YYYY-MM-DD HH:MM'. Include the date unless it's today." }
                         },
                         "required": ["title"]
                     }),
@@ -62,7 +84,7 @@ impl Registry {
                         "properties": {
                             "text": { "type": "string", "description": "What to remind them about" },
                             "in_minutes": { "type": "integer" },
-                            "at": { "type": "string", "description": "'YYYY-MM-DD HH:MM' or 'HH:MM' (24h, local time)" }
+                            "at": { "type": "string", "description": "Local 'YYYY-MM-DD HH:MM' (24h). Include the date unless it's today." }
                         },
                         "required": ["text"]
                     }),
@@ -96,6 +118,63 @@ impl Registry {
                     "Stop the current focus block or break.",
                     json!({ "type": "object", "properties": {} }),
                     |app, _| Ok(if focus::stop(app)? { "Stopped." } else { "Nothing was running." }.into()),
+                ),
+                tool(
+                    "get_schedule",
+                    "Get the user's Outlook calendar events for a day (or several days).",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "date": { "type": "string", "description": "'today', 'tomorrow', a weekday name, or YYYY-MM-DD. Default today." },
+                            "days": { "type": "integer", "description": "Number of days to include. Default 1." }
+                        }
+                    }),
+                    get_schedule,
+                ),
+                tool(
+                    "find_free_time",
+                    "Find free slots in the user's workday on a date, between meetings.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "date": { "type": "string", "description": "'today', 'tomorrow', a weekday name, or YYYY-MM-DD. Default today." },
+                            "min_minutes": { "type": "integer", "description": "Shortest useful slot. Default 30." }
+                        }
+                    }),
+                    find_free_time,
+                ),
+                async_tool(
+                    "create_event",
+                    "Create an Outlook calendar event, optionally inviting people and adding a Teams link. The user is asked to approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "subject": { "type": "string" },
+                            "start": { "type": "string", "description": "Full local date and time 'YYYY-MM-DD HH:MM' (24h). Work out the date from the current time - 'tomorrow 3pm' needs tomorrow's date." },
+                            "duration_minutes": { "type": "integer", "description": "Default 30" },
+                            "attendees": { "type": "array", "items": { "type": "string" }, "description": "Email addresses" },
+                            "online_meeting": { "type": "boolean", "description": "Add a Teams meeting link" }
+                        },
+                        "required": ["subject", "start"]
+                    }),
+                    |app, args| Box::pin(async move { create_event(&app, &args).await }),
+                    Some(describe_create_event),
+                ),
+                async_tool(
+                    "respond_to_event",
+                    "Accept, decline, or tentatively accept a meeting invite. The user is asked to approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "integer", "description": "Event number from get_schedule" },
+                            "subject": { "type": "string", "description": "Part of the event title, if the id is unknown" },
+                            "response": { "type": "string", "enum": ["accept", "decline", "tentative"] },
+                            "comment": { "type": "string", "description": "Optional note to the organizer" }
+                        },
+                        "required": ["response"]
+                    }),
+                    |app, args| Box::pin(async move { respond_to_event(&app, &args).await }),
+                    Some(describe_response),
                 ),
                 tool(
                     "list_notifications",
@@ -132,11 +211,20 @@ impl Registry {
             .collect()
     }
 
-    pub fn call(&self, app: &AppHandle, name: &str, args: &Value) -> String {
-        match self.tools.iter().find(|t| t.name == name) {
-            Some(t) => (t.handler)(app, args).unwrap_or_else(|e| format!("error: {e}")),
-            None => format!("error: unknown tool '{name}'"),
-        }
+    /// `None` if the tool runs without asking; otherwise the approval text, or
+    /// an error if the arguments are invalid before even asking.
+    pub fn approval(&self, app: &AppHandle, name: &str, args: &Value) -> Option<anyhow::Result<String>> {
+        let tool = self.tools.iter().find(|t| t.name == name)?;
+        tool.approval.map(|describe| describe(app, args))
+    }
+
+    pub async fn call(&self, app: &AppHandle, name: &str, args: &Value) -> String {
+        let result = match self.tools.iter().find(|t| t.name == name).map(|t| &t.handler) {
+            Some(Handler::Sync(f)) => f(app, args),
+            Some(Handler::Async(f)) => f(app.clone(), args.clone()).await,
+            None => return format!("error: unknown tool '{name}'"),
+        };
+        result.unwrap_or_else(|e| format!("error: {e}"))
     }
 }
 
@@ -187,10 +275,17 @@ fn friendly(ts: &str) -> String {
 fn resolve_task(app: &AppHandle, args: &Value) -> anyhow::Result<db::Task> {
     let state = app.state::<AppState>();
     let conn = state.db.lock().unwrap();
+    let needle = arg_str(args, "title").map(str::to_lowercase);
     if let Some(id) = arg_i64(args, "id") {
-        return db::get_task(&conn, id)?.ok_or_else(|| anyhow::anyhow!("no task with id {id}"));
+        // Small models sometimes invent ids; when a title is also given, it must agree.
+        match (db::get_task(&conn, id)?, &needle) {
+            (Some(t), None) => return Ok(t),
+            (Some(t), Some(n)) if t.title.to_lowercase().contains(n.as_str()) => return Ok(t),
+            (None, None) => anyhow::bail!("no task with id {id}"),
+            _ => {}
+        }
     }
-    let needle = arg_str(args, "title").ok_or_else(|| anyhow::anyhow!("give an id or title"))?.to_lowercase();
+    let needle = needle.ok_or_else(|| anyhow::anyhow!("give an id or title"))?;
     let matches: Vec<_> = db::list_tasks(&conn, false)?
         .into_iter()
         .filter(|t| t.title.to_lowercase().contains(&needle))
@@ -276,9 +371,10 @@ fn start_focus(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
         None => None,
     };
     let minutes = arg_i64(args, "minutes").map(|m| m as u32);
-    let s = focus::start(app, minutes, task.as_ref().map(|t| t.id))?;
+    let (s, note) = focus::start(app, minutes, task.as_ref().map(|t| t.id))?;
     let on = task.map(|t| format!(" on '{}'", t.title)).unwrap_or_default();
-    Ok(format!("Focus block started{on}, ends at {}. Do Not Disturb is on.", friendly(&s.ends_at)))
+    let note = note.map(|n| format!(" {n}")).unwrap_or_default();
+    Ok(format!("Focus block started{on}, ends at {}. Do Not Disturb is on.{note}", friendly(&s.ends_at)))
 }
 
 fn list_notifications(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
@@ -322,6 +418,222 @@ fn focus_status(app: &AppHandle, _: &Value) -> anyhow::Result<String> {
     })
 }
 
+// ---- calendar ----
+
+fn require_calendar(app: &AppHandle) -> anyhow::Result<()> {
+    if !calendar::connected(app) {
+        anyhow::bail!("no calendar connected - the user can connect Outlook from the ⚙ Connections panel");
+    }
+    Ok(())
+}
+
+/// 'today', 'tomorrow', a weekday name (next occurrence, today included), or YYYY-MM-DD.
+fn parse_date(s: Option<&str>) -> anyhow::Result<NaiveDate> {
+    let today = Local::now().date_naive();
+    let Some(s) = s.map(|s| s.trim().to_lowercase()) else { return Ok(today) };
+    match s.as_str() {
+        "" | "today" => return Ok(today),
+        "tomorrow" => return Ok(today + Duration::days(1)),
+        _ => {}
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
+        return Ok(d);
+    }
+    let (next, day) = match s.strip_prefix("next ") {
+        Some(rest) => (true, rest),
+        None => (false, s.strip_prefix("this ").unwrap_or(&s)),
+    };
+    let weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    if let Some(i) = weekdays.iter().position(|w| day.starts_with(&w[..3])) {
+        let mut ahead = (i as i64 - today.weekday().num_days_from_monday() as i64).rem_euclid(7);
+        if next && ahead == 0 {
+            ahead = 7;
+        }
+        return Ok(today + Duration::days(ahead));
+    }
+    anyhow::bail!("couldn't understand date '{s}'")
+}
+
+fn day_label(d: NaiveDate) -> String {
+    let today = Local::now().date_naive();
+    if d == today {
+        "Today".into()
+    } else if d == today + Duration::days(1) {
+        "Tomorrow".into()
+    } else {
+        d.format("%A %d %b").to_string()
+    }
+}
+
+fn get_schedule(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    require_calendar(app)?;
+    let first = parse_date(arg_str(args, "date"))?;
+    let days = arg_i64(args, "days").unwrap_or(1).clamp(1, 14);
+    let state = app.state::<AppState>();
+    let conn = state.db.lock().unwrap();
+    let mut out = vec![];
+    for i in 0..days {
+        let d = first + Duration::days(i);
+        let events = db::events_between(&conn, &format!("{d} 00:00:00"), &format!("{} 00:00:00", d + Duration::days(1)))?;
+        let lines = if events.is_empty() {
+            "  (no meetings)".to_string()
+        } else {
+            events.iter().map(|e| format!("  {}", calendar::describe(e))).collect::<Vec<_>>().join("\n")
+        };
+        out.push(format!("{}:\n{lines}", day_label(d)));
+    }
+    Ok(out.join("\n"))
+}
+
+fn find_free_time(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    require_calendar(app)?;
+    let d = parse_date(arg_str(args, "date"))?;
+    let min = arg_i64(args, "min_minutes").filter(|m| *m > 0).unwrap_or(30);
+    let state = app.state::<AppState>();
+    let wd = &state.persona.workday;
+    let mut cursor = format!("{d} {}:00", wd.start);
+    let day_end = format!("{d} {}:00", wd.end);
+    let now = db::now_ts();
+    if cursor < now {
+        cursor = now;
+    }
+    if cursor >= day_end {
+        return Ok(format!("{}'s workday ({}–{}) is already over.", day_label(d), wd.start, wd.end));
+    }
+    let busy = db::busy_between(&state.db.lock().unwrap(), &cursor, &day_end)?;
+    let mut slots = vec![];
+    let mut push = |from: &str, to: &str| {
+        let len = NaiveDateTime::parse_from_str(to, db::TS)
+            .ok()
+            .zip(NaiveDateTime::parse_from_str(from, db::TS).ok())
+            .map(|(t, f)| (t - f).num_minutes())
+            .unwrap_or(0);
+        if len >= min {
+            slots.push(format!("{}–{} ({len} min)", calendar::hm(from), calendar::hm(to)));
+        }
+    };
+    for e in &busy {
+        if e.start_at > cursor {
+            push(&cursor, &e.start_at);
+        }
+        if e.end_at > cursor {
+            cursor = e.end_at.clone();
+        }
+    }
+    if cursor < day_end {
+        push(&cursor, &day_end);
+    }
+    Ok(if slots.is_empty() {
+        format!("No free slots of {min}+ minutes {} within {}–{}.", day_label(d).to_lowercase(), wd.start, wd.end)
+    } else {
+        format!("Free {}: {}", day_label(d).to_lowercase(), slots.join(", "))
+    })
+}
+
+fn meeting_from_args(args: &Value) -> anyhow::Result<NewMeeting> {
+    let subject = arg_str(args, "subject").ok_or_else(|| anyhow::anyhow!("subject is required"))?;
+    let start_raw = arg_str(args, "start").ok_or_else(|| anyhow::anyhow!("start is required"))?;
+    let start_at = parse_when(start_raw).ok_or_else(|| anyhow::anyhow!("couldn't understand start '{start_raw}'"))?;
+    let minutes = arg_i64(args, "duration_minutes").filter(|m| (5..=600).contains(m)).unwrap_or(30);
+    let end_at = (NaiveDateTime::parse_from_str(&start_at, db::TS)? + Duration::minutes(minutes)).format(db::TS).to_string();
+    let attendees = args
+        .get("attendees")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(|s| s.trim().to_string()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if let Some(bad) = attendees.iter().find(|a| !a.contains('@')) {
+        anyhow::bail!("'{bad}' isn't an email address - ask the user for it");
+    }
+    Ok(NewMeeting {
+        subject: subject.to_string(),
+        start_at,
+        end_at,
+        attendees,
+        online: args.get("online_meeting").and_then(Value::as_bool).unwrap_or(false),
+    })
+}
+
+fn describe_create_event(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    if !calendar::status(app).can_write {
+        anyhow::bail!("creating events needs Outlook sign-in (not connected, or connected read-only via ICS)");
+    }
+    let m = meeting_from_args(args)?;
+    let mut text = format!("Create “{}” · {} {}–{}", m.subject, friendly(&m.start_at), calendar::hm(&m.start_at), calendar::hm(&m.end_at));
+    if !m.attendees.is_empty() {
+        text += &format!(" · invite {}", m.attendees.join(", "));
+    }
+    if m.online {
+        text += " · Teams link";
+    }
+    Ok(text)
+}
+
+async fn create_event(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    let e = calendar::create_event(app, &meeting_from_args(args)?).await?;
+    Ok(format!("Created: {}", calendar::describe(&e)))
+}
+
+fn resolve_event(app: &AppHandle, args: &Value) -> anyhow::Result<db::CalEvent> {
+    let state = app.state::<AppState>();
+    let conn = state.db.lock().unwrap();
+    let needle = arg_str(args, "subject").map(str::to_lowercase);
+    if let Some(num) = arg_i64(args, "id") {
+        // Small models sometimes invent ids; when a subject is also given, it must agree.
+        match (db::get_event(&conn, num)?, &needle) {
+            (Some(e), None) => return Ok(e),
+            (Some(e), Some(n)) if e.subject.to_lowercase().contains(n.as_str()) => return Ok(e),
+            (None, None) => anyhow::bail!("no event #{num}"),
+            _ => {}
+        }
+    }
+    let needle = needle.ok_or_else(|| anyhow::anyhow!("give an event id or subject"))?;
+    let upcoming = db::events_between(&conn, &db::now_ts(), "9999")?;
+    let matches: Vec<_> = upcoming.into_iter().filter(|e| e.subject.to_lowercase().contains(&needle)).collect();
+    match matches.len() {
+        0 => anyhow::bail!("no upcoming event matching '{needle}'"),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        // Recurring meetings match many times; the soonest is almost always the one meant.
+        _ if matches.iter().all(|e| e.subject == matches[0].subject) => Ok(matches.into_iter().next().unwrap()),
+        _ => anyhow::bail!(
+            "several events match: {}",
+            matches.iter().take(6).map(|e| format!("#{} {} {}", e.num, friendly(&e.start_at), e.subject)).collect::<Vec<_>>().join("; ")
+        ),
+    }
+}
+
+/// (Graph action, verb for the approval card, past tense for the result)
+fn graph_response(args: &Value) -> anyhow::Result<(&'static str, &'static str, &'static str)> {
+    match arg_str(args, "response").map(str::to_lowercase).as_deref() {
+        Some("accept") => Ok(("accept", "Accept", "Accepted")),
+        Some("decline") => Ok(("decline", "Decline", "Declined")),
+        Some("tentative") | Some("tentativelyaccept") => Ok(("tentativelyAccept", "Tentatively accept", "Tentatively accepted")),
+        _ => anyhow::bail!("response must be accept, decline, or tentative"),
+    }
+}
+
+fn describe_response(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    if !calendar::status(app).can_write {
+        anyhow::bail!("responding to invites needs Outlook sign-in (not connected, or connected read-only via ICS)");
+    }
+    let (_, verb, _) = graph_response(args)?;
+    let e = resolve_event(app, args)?;
+    let mut text = format!("{verb} “{}” · {} {}", e.subject, friendly(&e.start_at), calendar::hm(&e.start_at));
+    if let Some(org) = &e.organizer {
+        text += &format!(" · organizer {org}");
+    }
+    if let Some(c) = arg_str(args, "comment") {
+        text += &format!(" · note: “{c}”");
+    }
+    Ok(text)
+}
+
+async fn respond_to_event(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    let (response, _, done) = graph_response(args)?;
+    let e = resolve_event(app, args)?;
+    calendar::respond(app, &e, response, arg_str(args, "comment").unwrap_or("")).await?;
+    Ok(format!("{done} “{}” ({}).", e.subject, friendly(&e.start_at)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +648,20 @@ mod tests {
     fn clock_time_is_in_the_future() {
         let ts = parse_when("00:00").unwrap();
         assert!(ts > db::now_ts());
+    }
+
+    #[test]
+    fn dates() {
+        let today = Local::now().date_naive();
+        assert_eq!(parse_date(None).unwrap(), today);
+        assert_eq!(parse_date(Some("tomorrow")).unwrap(), today + Duration::days(1));
+        assert_eq!(parse_date(Some("2026-12-01")).unwrap(), NaiveDate::from_ymd_opt(2026, 12, 1).unwrap());
+        let fri = parse_date(Some("Friday")).unwrap();
+        assert_eq!(fri.weekday(), chrono::Weekday::Fri);
+        assert!((0..7).contains(&(fri - today).num_days()));
+        let next_mon = parse_date(Some("next monday")).unwrap();
+        assert_eq!(next_mon.weekday(), chrono::Weekday::Mon);
+        assert!((1..=7).contains(&(next_mon - today).num_days()));
     }
 
     #[test]

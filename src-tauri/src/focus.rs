@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{db, desktop, notifications, AppState};
+use crate::{calendar, db, desktop, notifications, AppState};
 
 #[derive(Serialize)]
 pub struct FocusStatus {
@@ -31,10 +31,25 @@ pub fn status(app: &AppHandle) -> anyhow::Result<FocusStatus> {
     })
 }
 
-/// Starts a focus block, replacing any running session.
-pub fn start(app: &AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> anyhow::Result<db::FocusSession> {
+/// Least focus time worth starting before a meeting.
+const MIN_BLOCK_BEFORE_MEETING: i64 = 10;
+/// Ends the block this long before a meeting, to get ready.
+const MEETING_BUFFER: i64 = 2;
+
+/// Starts a focus block, replacing any running session. If a meeting would
+/// interrupt it, the block is shortened; the returned note says so.
+pub fn start(app: &AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> anyhow::Result<(db::FocusSession, Option<String>)> {
     let state = app.state::<AppState>();
-    let minutes = minutes.filter(|m| (1..=240).contains(m)).unwrap_or(state.persona.pomodoro.focus_minutes);
+    let mut minutes = minutes.filter(|m| (1..=240).contains(m)).unwrap_or(state.persona.pomodoro.focus_minutes);
+    let mut note = None;
+    if let Some(m) = calendar::next_meeting_within(app, minutes as i64 + MEETING_BUFFER) {
+        let room = calendar::minutes_until(&m.start_at) - MEETING_BUFFER;
+        if room < MIN_BLOCK_BEFORE_MEETING {
+            anyhow::bail!("“{}” starts at {} - too close for a focus block. Start one after it?", m.subject, calendar::hm(&m.start_at));
+        }
+        minutes = room as u32;
+        note = Some(format!("Shortened to {minutes} min so you're free for “{}” at {}.", m.subject, calendar::hm(&m.start_at)));
+    }
     let session = {
         let conn = state.db.lock().unwrap();
         if let Some(prev) = db::active_session(&conn)? {
@@ -47,7 +62,7 @@ pub fn start(app: &AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> any
         session
     };
     let _ = app.emit("focus://changed", ());
-    Ok(session)
+    Ok((session, note))
 }
 
 /// Stops whatever session is running. Returns false if nothing was running.

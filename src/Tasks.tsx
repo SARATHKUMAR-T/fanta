@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, friendlyTime, parseTs, Task } from "./api";
+import { startFocus } from "./FocusBar";
 
 export default function Tasks({ onCount }: { onCount: (n: number) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -84,7 +85,7 @@ function TaskRow({ task: t }: { task: Task }) {
         </span>
       </div>
       {!t.done && (
-        <button className="icon" title="Focus on this" onClick={() => api.startFocus(undefined, t.id)}>
+        <button className="icon" title="Focus on this" onClick={() => startFocus(undefined, t.id)}>
           ▶
         </button>
       )}

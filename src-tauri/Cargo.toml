@@ -26,4 +26,9 @@ chrono = "0.4"
 anyhow = "1"
 zbus = "5"
 notify-rust = "4"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+rrule = "0.14"
+chrono-tz = "0.10"
+urlencoding = "2"
+iana-time-zone = "0.1"
 tokio = { version = "1", features = ["time", "sync"] }
