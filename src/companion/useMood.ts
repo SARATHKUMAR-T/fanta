@@ -21,6 +21,8 @@ const KIND_WORDS = /\b(thank(s| you)?|thx|love (you|it)|awesome|great job|good j
 export function useMood(): Mood {
   const [base, setBase] = useState<Mood>("idle");
   const [reaction, setReaction] = useState<Mood | null>(null);
+  // While a voice exchange is happening, that wins over everything else.
+  const [voiceMood, setVoiceMood] = useState<Mood | null>(null);
   const timer = useRef<number | undefined>(undefined);
   const holding = useRef(false); // an approval is waiting: stay worried until answered
   const baseRef = useRef<Mood>("idle");
@@ -74,6 +76,11 @@ export function useMood(): Mood {
         e.payload.approved ? react("wink", 2000, true) : react("idle", 10, true);
       }),
       listen<boolean>("panel://visible", (e) => e.payload && react("wave", 1800)),
+      listen<string>("voice://state", (e) =>
+        setVoiceMood(e.payload === "listening" ? "listening" : e.payload === "transcribing" ? "thinking" : null),
+      ),
+      listen<boolean>("voice://speaking", (e) => setVoiceMood(e.payload ? "talking" : null)),
+      listen("voice://error", () => react("sad", 2500)),
     ];
 
     // Every so often, a small idle flourish so she feels alive.
@@ -90,5 +97,5 @@ export function useMood(): Mood {
     };
   }, []);
 
-  return reaction ?? base;
+  return voiceMood ?? reaction ?? base;
 }

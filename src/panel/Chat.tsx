@@ -3,7 +3,9 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { api, ApprovalRequest } from "../api";
 import Character from "../companion/Character";
 import { UI_EVENTS } from "../companion/useMood";
-import { SendIcon, ShieldIcon } from "../ui/Icons";
+import { MicIcon, SendIcon, ShieldIcon } from "../ui/Icons";
+
+type VoiceState = "idle" | "listening" | "transcribing";
 
 type Msg =
   | { role: "user" | "assistant" | "error"; content: string }
@@ -50,6 +52,13 @@ export default function Chat({ name }: { name: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastTyping = useRef(0);
+  const [voice, setVoice] = useState<VoiceState>("idle");
+  const [level, setLevel] = useState(0);
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  const [voiceSetup, setVoiceSetup] = useState<{ installing: boolean; progress?: string; error?: string } | null>(null);
+  const [speaking, setSpeaking] = useState(false);
+  // Event listeners are registered once, so they reach the latest send() through a ref.
+  const sendRef = useRef<(text: string, byVoice: boolean) => void>(() => {});
 
   useEffect(() => {
     api.history().then((h) => setMessages(h.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))));
@@ -75,6 +84,24 @@ export default function Chat({ name }: { name: string }) {
         ),
       ),
       listen<boolean>("panel://visible", (e) => e.payload && setTimeout(() => inputRef.current?.focus(), 50)),
+      listen<VoiceState>("voice://state", (e) => {
+        setVoice(e.payload);
+        if (e.payload === "listening") setVoiceNote(null);
+      }),
+      listen<number>("voice://level", (e) => setLevel(e.payload)),
+      listen<string>("voice://heard", (e) => sendRef.current(e.payload, true)),
+      listen<string>("voice://error", (e) => {
+        setVoiceNote(e.payload);
+        setTimeout(() => setVoiceNote(null), 5000);
+      }),
+      listen<boolean>("voice://speaking", (e) => setSpeaking(e.payload)),
+      listen<{ label: string; done: number; total: number }>("voice://progress", (e) =>
+        setVoiceSetup((v) => ({
+          installing: true,
+          progress: `Downloading ${e.payload.label}… ${Math.round(e.payload.done / 1e6)} / ${Math.round(e.payload.total / 1e6)} MB`,
+          error: v?.error,
+        })),
+      ),
     ];
     return () => subs.forEach((p) => p.then((f) => f()));
   }, []);
@@ -83,7 +110,7 @@ export default function Chat({ name }: { name: string }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, toolNote, busy]);
 
-  async function send(textArg?: string) {
+  async function send(textArg?: string, byVoice = false) {
     const text = (textArg ?? draft).trim();
     if (!text || busy) return;
     setDraft("");
@@ -92,13 +119,46 @@ export default function Chat({ name }: { name: string }) {
     emit(UI_EVENTS.userMessage, text);
     emit(UI_EVENTS.thinking);
     try {
-      await api.send(text);
+      const reply = await api.send(text);
+      if (byVoice) emit("ui://voice-reply", reply); // the companion shows it if the panel is closed
+      if (await api.voiceShouldSpeak(byVoice)) await api.voiceSpeak(reply);
     } catch (err) {
       setMessages((prev) => [...prev, { role: "error", content: String(err) }]);
       emit(UI_EVENTS.error);
     } finally {
       setBusy(false);
       setToolNote(null);
+    }
+  }
+
+  sendRef.current = (text, byVoice) => send(text, byVoice);
+
+  async function mic() {
+    if (speaking) {
+      await api.voiceStop();
+      return;
+    }
+    const st = await api.voiceStatus();
+    if (!st.installed) {
+      setVoiceSetup({ installing: st.installing });
+      return;
+    }
+    try {
+      await api.voiceListen(); // a second click while listening means "done talking"
+    } catch (e) {
+      setVoiceNote(String(e));
+    }
+  }
+
+  async function installVoice() {
+    setVoiceSetup({ installing: true, progress: "Starting download…" });
+    try {
+      await api.voiceInstall();
+      setVoiceSetup(null);
+      setVoiceNote("Voice is ready - click the mic and talk to me!");
+      api.voiceSpeak("Hi! I can hear you now. Click the mic, or press Control Alt Space, and just talk.");
+    } catch (e) {
+      setVoiceSetup({ installing: false, error: String(e) });
     }
   }
 
@@ -176,6 +236,27 @@ export default function Chat({ name }: { name: string }) {
             </div>
           </div>
         )}
+        {voiceSetup && (
+          <div className="voice-setup">
+            <div className="voice-setup-title">🎙️ Talk to {name}</div>
+            <p>
+              Speech runs fully on this computer - nothing is sent anywhere. It needs a one-time download of about 230 MB (speech recognition and{" "}
+              {name}'s voice).
+            </p>
+            {voiceSetup.progress && <div className="muted small">{voiceSetup.progress}</div>}
+            {voiceSetup.error && <div className="error-text">{voiceSetup.error}</div>}
+            <div className="approval-actions">
+              <button className="btn primary" disabled={voiceSetup.installing} onClick={installVoice}>
+                {voiceSetup.installing ? "Downloading…" : "Download voice"}
+              </button>
+              {!voiceSetup.installing && (
+                <button className="btn ghost" onClick={() => setVoiceSetup(null)}>
+                  Not now
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -186,6 +267,17 @@ export default function Chat({ name }: { name: string }) {
           send();
         }}
       >
+        {voice !== "idle" ? (
+          <div className="listening" onClick={() => voice === "listening" && api.voiceListen()}>
+            <span className="rec-dot" />
+            <span className="levels">
+              {[0.5, 0.8, 1, 0.8, 0.5].map((k, i) => (
+                <i key={i} style={{ height: `${6 + Math.min(1, level * 2.2) * 18 * k}px` }} />
+              ))}
+            </span>
+            <span>{voice === "listening" ? "Listening… (click when done)" : "Got it, thinking…"}</span>
+          </div>
+        ) : (
         <textarea
           ref={inputRef}
           rows={1}
@@ -210,9 +302,23 @@ export default function Chat({ name }: { name: string }) {
             }
           }}
         />
-        <button className="send" disabled={busy || !draft.trim()} aria-label="Send">
-          <SendIcon size={18} />
-        </button>
+        )}
+        {voiceNote && <div className="voice-note">{voiceNote}</div>}
+        {draft.trim() ? (
+          <button className="send" disabled={busy} aria-label="Send">
+            <SendIcon size={18} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={`send mic ${voice} ${speaking ? "speaking" : ""}`}
+            onClick={mic}
+            title={speaking ? "Stop talking" : voice === "listening" ? "Done talking" : "Talk (Ctrl+Alt+Space)"}
+            aria-label="Talk"
+          >
+            <MicIcon size={18} />
+          </button>
+        )}
       </form>
     </div>
   );

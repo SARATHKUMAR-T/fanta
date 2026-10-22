@@ -34,6 +34,11 @@ iana-time-zone = "0.1"
 shell-words = "1"
 tokio = { version = "1", features = ["time", "sync", "process", "io-util"] }
 whisper-rs = "0.16.0"
+tauri-plugin-global-shortcut = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# Speech recognition is unusably slow unoptimized; build it optimized even in dev.
+[profile.dev.package.whisper-rs-sys]
+opt-level = 3

@@ -106,6 +106,15 @@ export type PluginInfo = {
   log: string[];
 };
 
+export type VoiceStatus = {
+  installed: boolean;
+  installing: boolean;
+  listening: boolean;
+  speaking: boolean;
+  speak_mode: "voice" | "always" | "never";
+  download_mb: number;
+};
+
 export const api = {
   persona: () => invoke<Persona>("get_persona"),
   history: () => invoke<{ role: string; content: string }[]>("get_history"),
@@ -147,6 +156,13 @@ export const api = {
   brainConfigure: (provider: Provider, model: string | null, background: boolean) =>
     invoke<void>("brain_configure", { provider, model, background }),
   brainModels: (provider: Provider, key?: string) => invoke<string[]>("brain_models", { provider, key }),
+  voiceStatus: () => invoke<VoiceStatus>("voice_status"),
+  voiceInstall: () => invoke<void>("voice_install"),
+  voiceListen: () => invoke<void>("voice_listen"),
+  voiceSpeak: (text: string) => invoke<void>("voice_speak", { text }),
+  voiceStop: () => invoke<void>("voice_stop"),
+  voiceSetMode: (mode: VoiceStatus["speak_mode"]) => invoke<void>("voice_set_mode", { mode }),
+  voiceShouldSpeak: (byVoice: boolean) => invoke<boolean>("voice_should_speak", { byVoice }),
 };
 
 /** Local "YYYY-MM-DD HH:MM:SS" for a Date, matching the backend. */

@@ -11,6 +11,7 @@ mod persona;
 mod plugins;
 mod scheduler;
 mod tools;
+mod voice;
 mod windows;
 
 use llm::{Message, Ollama};
@@ -23,6 +24,8 @@ use tauri::{
 };
 
 const HISTORY_LIMIT: usize = 20;
+/// Talk to Fanta from anywhere.
+const VOICE_SHORTCUT: &str = "ctrl+alt+space";
 const MAX_TOOL_ROUNDS: usize = 5;
 
 pub struct AppState {
@@ -35,6 +38,7 @@ pub struct AppState {
     pub calendar: calendar::Calendar,
     pub approvals: approvals::Approvals,
     pub plugins: plugins::Host,
+    pub voice: voice::Voice,
 }
 
 #[tauri::command]
@@ -362,6 +366,42 @@ async fn brain_models(app: AppHandle, provider: String, key: Option<String>) -> 
 }
 
 #[tauri::command]
+fn voice_status(app: AppHandle) -> voice::Status {
+    voice::status(&app)
+}
+
+#[tauri::command]
+async fn voice_install(app: AppHandle) -> Result<(), String> {
+    voice::install(&app).await.map_err(err)
+}
+
+/// Starts listening; called again while listening, it ends the recording.
+#[tauri::command]
+fn voice_listen(app: AppHandle) -> Result<(), String> {
+    voice::start_listening(&app).map_err(err)
+}
+
+#[tauri::command]
+fn voice_speak(app: AppHandle, text: String) -> Result<(), String> {
+    voice::speak(&app, &text).map_err(err)
+}
+
+#[tauri::command]
+fn voice_stop(app: AppHandle) {
+    voice::stop_speaking(&app);
+}
+
+#[tauri::command]
+fn voice_set_mode(app: AppHandle, mode: String) -> Result<(), String> {
+    voice::set_speak_mode(&app, &mode).map_err(err)
+}
+
+#[tauri::command]
+fn voice_should_speak(app: AppHandle, by_voice: bool) -> bool {
+    voice::should_speak(&app, by_voice)
+}
+
+#[tauri::command]
 fn toggle_panel(app: AppHandle) -> Result<(), String> {
     windows::toggle_panel(&app).map_err(|e| e.to_string())
 }
@@ -392,11 +432,25 @@ pub fn run() {
         calendar: calendar::Calendar::default(),
         approvals: approvals::Approvals::default(),
         plugins: plugins::Host::default(),
+        voice: voice::Voice::default(),
         persona,
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcut(VOICE_SHORTCUT)
+                .expect("valid shortcut")
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        if let Err(e) = voice::start_listening(app) {
+                            let _ = app.emit("voice://error", e.to_string());
+                        }
+                    }
+                })
+                .build(),
+        )
         .manage(state)
         .setup(|app| {
             // If Fanta quit mid-focus, don't leave the user stuck in Do Not Disturb.
@@ -486,7 +540,14 @@ pub fn run() {
             brain_status,
             brain_save_key,
             brain_configure,
-            brain_models
+            brain_models,
+            voice_status,
+            voice_install,
+            voice_listen,
+            voice_speak,
+            voice_stop,
+            voice_set_mode,
+            voice_should_speak
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

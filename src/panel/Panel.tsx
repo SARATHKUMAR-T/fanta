@@ -13,6 +13,7 @@ import Chat from "./Chat";
 import { FocusPill, mmss, useFocusNote, useFocusStatus } from "./focus";
 import Brain from "./Brain";
 import Plugins from "./Plugins";
+import VoiceSettings from "./VoiceSettings";
 import "./panel.css";
 
 type View = "chat" | "tasks" | "inbox" | "calendar" | "settings";
@@ -137,6 +138,7 @@ export default function Panel() {
               <h2>Settings</h2>
             </div>
             <Brain />
+            <VoiceSettings />
             <Connections />
             <Plugins />
             <section className="card">

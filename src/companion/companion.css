@@ -146,3 +146,21 @@
 @keyframes bubble-in { from { opacity: 0; transform: translateY(8px) scale(0.92); } to { opacity: 1; transform: none; } }
 @keyframes badge-pop { from { transform: scale(0.4); } to { transform: scale(1); } }
 @keyframes hint-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+
+.mic-badge {
+  position: absolute;
+  top: 18px;
+  left: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  background: #e8453c;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 0 rgba(232, 69, 60, 0.5);
+  animation: mic-ring 1.2s ease-out infinite;
+}
+.mic-badge.transcribing { background: #ffb054; animation: none; }
+@keyframes mic-ring { 0% { box-shadow: 0 0 0 0 rgba(232, 69, 60, 0.55); } 100% { box-shadow: 0 0 0 12px rgba(232, 69, 60, 0); } }

@@ -79,3 +79,15 @@ export const RefreshIcon = (p: P) => (
     <path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.6M20 4v4.6h-4.6" />
   </Svg>
 );
+export const MicIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+  </Svg>
+);
+export const SpeakerIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4Z" />
+    <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
+  </Svg>
+);

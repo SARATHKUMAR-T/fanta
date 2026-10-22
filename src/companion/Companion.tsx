@@ -45,6 +45,8 @@ export default function Companion() {
   const focusRef = useRef<FocusStatus | null>(null);
   const panelOpenRef = useRef(false);
   const press = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
+  const [voice, setVoice] = useState<"idle" | "listening" | "transcribing">("idle");
+  const [speaking, setSpeaking] = useState(false);
 
   async function say(b: Bubble | null, ms = BUBBLE_MS) {
     clearTimeout(bubbleTimer.current);
@@ -125,6 +127,18 @@ export default function Companion() {
         pendingApprovals.current.delete(e.payload.id);
         if (pendingApprovals.current.size === 0) say(null);
       }),
+      listen<"idle" | "listening" | "transcribing">("voice://state", (e) => setVoice(e.payload)),
+      listen<boolean>("voice://speaking", (e) => setSpeaking(e.payload)),
+      listen<string>("voice://heard", (e) => {
+        if (!panelOpenRef.current) say({ kind: "info", title: "🎙️ You said", text: clip(e.payload) }, 0);
+      }),
+      // Spoken conversations happen with the chat closed, so show the answer here too.
+      listen<string>("ui://voice-reply", (e) => {
+        if (!panelOpenRef.current) say({ kind: "info", title: "Fanta", text: clip(e.payload, 260) }, 20_000);
+      }),
+      listen<string>("voice://error", (e) => {
+        if (!panelOpenRef.current) say({ kind: "info", text: e.payload }, 4000);
+      }),
       listen<boolean>("panel://visible", (e) => {
         panelOpenRef.current = e.payload;
         setPanelOpen(e.payload);
@@ -175,6 +189,18 @@ export default function Companion() {
     }
   }
 
+  // Right-click = talk (or stop her talking).
+  function onContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    dismissHint();
+    if (speaking) api.voiceStop();
+    else
+      api.voiceListen().catch(() => {
+        // Voice isn't set up yet: open the chat, where the mic button offers the download.
+        api.togglePanel();
+      });
+  }
+
   return (
     <div className="companion">
       {bubble && (
@@ -201,7 +227,8 @@ export default function Companion() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        title="Click to chat · drag to move"
+        onContextMenu={onContextMenu}
+        title="Click to chat · right-click to talk · drag to move"
       >
         <div className="halo" />
         <Character mood={mood} size={132} />
@@ -211,6 +238,7 @@ export default function Companion() {
             {onBreak ? "☕" : "🎧"} {mmss(remaining)}
           </span>
         )}
+        {voice !== "idle" && <span className={`mic-badge ${voice}`}>🎙️</span>}
         {hint && !bubble && <span className="hint">Click me!</span>}
       </div>
     </div>
