@@ -65,3 +65,64 @@ header p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
   background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
 }
 .composer button:disabled { opacity: 0.45; cursor: default; }
+
+/* ---- focus bar ---- */
+.muted { color: var(--muted); font-size: 13px; }
+.focusbar { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.focusbar.idle { display: flex; align-items: center; gap: 12px; }
+.focusbar.focus { background: var(--accent-soft); }
+.focus-row { display: flex; align-items: center; justify-content: space-between; }
+.focus-label { font-size: 13px; font-weight: 600; }
+.countdown { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+.progress { height: 4px; margin-top: 8px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.progress > div { height: 100%; background: var(--accent); transition: width 1s linear; }
+.focusbar.break .progress > div { background: #4f9d7a; }
+
+button.primary {
+  padding: 7px 14px; border: 0; border-radius: 9px;
+  background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+}
+button.ghost {
+  padding: 6px 12px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+}
+button.link { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; padding: 8px 0; }
+button.icon {
+  border: 0; background: none; color: var(--muted); cursor: pointer;
+  width: 26px; height: 26px; border-radius: 6px; font-size: 15px; opacity: 0;
+}
+.task:hover button.icon { opacity: 1; }
+button.icon:hover { background: var(--border); color: var(--text); }
+
+/* ---- tabs ---- */
+.tabs { display: flex; gap: 4px; padding: 6px 12px 0; border-bottom: 1px solid var(--border); }
+.tabs button {
+  border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600;
+  padding: 8px 10px; border-bottom: 2px solid transparent; cursor: pointer;
+}
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.badge {
+  margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--accent); font-size: 12px;
+}
+.pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.pane.hidden { display: none; }
+
+/* ---- tasks ---- */
+.tasks { flex: 1; overflow-y: auto; padding: 12px 16px; }
+.task-add input {
+  width: 100%; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; outline: none;
+}
+.task-add input:focus { border-color: var(--accent); }
+.tasks .empty { padding: 32px 8px; }
+.tasks ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.task { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+.task input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.task-body { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.task-title { word-wrap: break-word; }
+.done .task-title { text-decoration: line-through; color: var(--muted); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips:empty { display: none; }
+.chip { font-size: 11.5px; padding: 1px 7px; border-radius: 8px; background: var(--border); color: var(--muted); }
+.chip.overdue { background: #f6d5d0; color: #a1372a; }

@@ -1,0 +1,136 @@
+//! Background loop: fires reminders, advances pomodoro sessions, and lets Fanta
+//! speak up on its own (morning brief, gentle nudges) during the workday.
+
+use chrono::{Local, NaiveDateTime};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::llm::Message;
+use crate::{db, desktop, focus, AppState};
+
+const TICK: Duration = Duration::from_secs(15);
+/// Nudge after this long without a focus block (and no more often than this).
+const NUDGE_AFTER_MIN: i64 = 90;
+/// Don't nudge someone who's away from the keyboard.
+const MAX_IDLE_MS: u64 = 5 * 60 * 1000;
+
+const LAST_BRIEF: &str = "last_brief_date";
+const LAST_NUDGE: &str = "last_nudge_at";
+
+static SPEAKING: AtomicBool = AtomicBool::new(false);
+
+pub fn spawn(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            if let Err(e) = fire_reminders(&app) {
+                eprintln!("reminders: {e}");
+            }
+            if let Err(e) = focus::tick(&app) {
+                eprintln!("focus: {e}");
+            }
+            if let Err(e) = proactive(&app).await {
+                eprintln!("proactive: {e}");
+            }
+            tokio::time::sleep(TICK).await;
+        }
+    });
+}
+
+/// Posts a message from Fanta into the chat (and as a desktop notification).
+fn post(app: &AppHandle, content: &str) -> anyhow::Result<()> {
+    let state = app.state::<AppState>();
+    db::insert_message(&state.db.lock().unwrap(), "assistant", content)?;
+    let _ = app.emit("chat://proactive", content);
+    desktop::notify(app, &state.persona.name, content);
+    Ok(())
+}
+
+fn fire_reminders(app: &AppHandle) -> anyhow::Result<()> {
+    let due = db::due_reminders(&app.state::<AppState>().db.lock().unwrap())?;
+    for task in due {
+        db::mark_reminded(&app.state::<AppState>().db.lock().unwrap(), task.id)?;
+        post(app, &format!("⏰ Reminder: {}", task.title))?;
+    }
+    Ok(())
+}
+
+fn minutes_since(ts: &str) -> Option<i64> {
+    let then = NaiveDateTime::parse_from_str(ts, db::TS).ok()?;
+    Some((Local::now().naive_local() - then).num_minutes())
+}
+
+async fn proactive(app: &AppHandle) -> anyhow::Result<()> {
+    let state = app.state::<AppState>();
+    let now = Local::now();
+    if !state.persona.proactive || !state.persona.in_workday(now) || SPEAKING.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let today = now.format("%Y-%m-%d").to_string();
+
+    let instruction = {
+        let conn = state.db.lock().unwrap();
+        if db::get_setting(&conn, LAST_BRIEF)?.as_deref() != Some(&today) {
+            db::set_setting(&conn, LAST_BRIEF, &today)?;
+            db::set_setting(&conn, LAST_NUDGE, &db::now_ts())?;
+            Some("This is your first check-in with the user today. Give a short, warm brief: \
+                  greet them in a way that fits the current time of day, mention the most important open tasks and any deadlines or \
+                  reminders today, and suggest what to focus on first. 2-4 sentences.")
+        } else {
+            let idle_ok = desktop::idle_ms().map_or(true, |ms| ms < MAX_IDLE_MS);
+            let running = db::active_session(&conn)?.is_some();
+            let has_tasks = !db::list_tasks(&conn, false)?.is_empty();
+            let since_focus = db::last_focus_activity(&conn)?
+                .and_then(|t| minutes_since(&t))
+                .unwrap_or(i64::MAX);
+            let since_nudge = db::get_setting(&conn, LAST_NUDGE)?
+                .and_then(|t| minutes_since(&t))
+                .unwrap_or(i64::MAX);
+            if idle_ok && !running && has_tasks && since_focus >= NUDGE_AFTER_MIN && since_nudge >= NUDGE_AFTER_MIN {
+                db::set_setting(&conn, LAST_NUDGE, &db::now_ts())?;
+                Some("The user hasn't done a focus block in a while and has open tasks. \
+                      Gently nudge them back on track: suggest one specific task and offer \
+                      to start a focus block. One or two sentences, no guilt-tripping.")
+            } else {
+                None
+            }
+        }
+    };
+
+    if let Some(instruction) = instruction {
+        SPEAKING.store(true, Ordering::SeqCst);
+        let result = speak(app, instruction).await;
+        SPEAKING.store(false, Ordering::SeqCst);
+        post(app, &result?)?;
+    }
+    Ok(())
+}
+
+/// Asks the model for a short proactive message in Fanta's voice.
+async fn speak(app: &AppHandle, instruction: &str) -> anyhow::Result<String> {
+    let state = app.state::<AppState>();
+    let context = {
+        let conn = state.db.lock().unwrap();
+        let tasks = db::list_tasks(&conn, false)?;
+        let list = if tasks.is_empty() {
+            "(none)".to_string()
+        } else {
+            tasks
+                .iter()
+                .take(15)
+                .map(|t| {
+                    let when = t.due_at.as_ref().map(|d| format!(" (due {d})")).unwrap_or_default();
+                    format!("- {}{when}", t.title)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        format!("Open tasks:\n{list}\nFocus blocks done today: {}", db::focus_blocks_today(&conn)?)
+    };
+    let messages = vec![
+        Message::new("system", state.persona.full_system_prompt()),
+        Message::new("user", format!("[Internal trigger, not from the user]\n{context}\n\n{instruction}")),
+    ];
+    let reply = state.ollama.chat(&state.persona.model, &messages, &[], |_| {}).await?;
+    Ok(reply.content.trim().to_string())
+}

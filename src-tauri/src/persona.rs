@@ -12,11 +12,15 @@ style:
   emoji: minimal
   verbosity: short
 
+# Nudges, morning brief, and check-ins during your workday.
 proactive: true
+# Turn on GNOME Do Not Disturb during focus blocks.
+focus_dnd: true
 
 workday:
   start: "09:00"
   end: "18:00"
+  days: [mon, tue, wed, thu, fri]
 
 pomodoro:
   focus_minutes: 25
@@ -42,6 +46,16 @@ pub struct Style {
 pub struct Workday {
     pub start: String,
     pub end: String,
+    #[serde(default = "default_days")]
+    pub days: Vec<String>,
+}
+
+fn default_days() -> Vec<String> {
+    ["mon", "tue", "wed", "thu", "fri"].map(String::from).to_vec()
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +72,8 @@ pub struct Persona {
     pub ollama_url: String,
     pub style: Style,
     pub proactive: bool,
+    #[serde(default = "yes")]
+    pub focus_dnd: bool,
     pub workday: Workday,
     pub pomodoro: Pomodoro,
     pub system_prompt: String,
@@ -78,10 +94,24 @@ pub fn load() -> anyhow::Result<Persona> {
     Ok(serde_yaml::from_str(&text)?)
 }
 
+const TOOL_GUIDE: &str = "You can manage the user's tasks, reminders, and focus (pomodoro) \
+sessions with your tools. When the user asks to be reminded, call set_reminder. When they want \
+to focus or start a pomodoro, call start_focus. Check list_tasks before answering questions about \
+their tasks. When the user says they finished something, call complete_task. After a tool runs, confirm in one short sentence.";
+
 impl Persona {
+    /// Whether `now` falls inside the configured workday.
+    pub fn in_workday(&self, now: chrono::DateTime<chrono::Local>) -> bool {
+        let day = now.format("%a").to_string().to_lowercase();
+        let hm = now.format("%H:%M").to_string();
+        self.workday.days.iter().any(|d| d.to_lowercase() == day)
+            && hm >= self.workday.start
+            && hm < self.workday.end
+    }
+
     pub fn full_system_prompt(&self) -> String {
         format!(
-            "{}\nStyle: {} tone, {} emoji, {} replies.\nUser's workday: {}-{}. Pomodoro: {}min focus / {}min break.\nCurrent local time: {}.",
+            "{}\n{TOOL_GUIDE}\nStyle: {} tone, {} emoji, {} replies.\nUser's workday: {}-{}. Pomodoro: {}min focus / {}min break.\nCurrent local time: {}.",
             self.system_prompt.trim(),
             self.style.tone,
             self.style.emoji,

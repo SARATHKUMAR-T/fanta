@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { api, Persona } from "./api";
+import FocusBar from "./FocusBar";
+import Tasks from "./Tasks";
 import "./App.css";
 
-type Persona = { name: string; tagline: string; model: string };
 type Msg = { role: "user" | "assistant" | "error"; content: string };
+type Tab = "chat" | "tasks";
 
 export default function App() {
   const [persona, setPersona] = useState<Persona | null>(null);
@@ -12,13 +14,13 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [toolNote, setToolNote] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("chat");
+  const [openTasks, setOpenTasks] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    invoke<Persona>("get_persona").then(setPersona);
-    invoke<{ role: string; content: string }[]>("get_history").then((h) =>
-      setMessages(h.map((m) => ({ role: m.role as Msg["role"], content: m.content }))),
-    );
+    api.persona().then(setPersona);
+    api.history().then((h) => setMessages(h.map((m) => ({ role: m.role as Msg["role"], content: m.content }))));
     const unToken = listen<string>("chat://token", (e) => {
       setToolNote(null);
       setMessages((prev) => {
@@ -29,14 +31,16 @@ export default function App() {
         return [...prev, { role: "assistant", content: e.payload }];
       });
     });
-    const unTool = listen<string>("chat://tool", (e) => setToolNote(`using ${e.payload}…`));
+    const unTool = listen<string>("chat://tool", (e) => setToolNote(`using ${e.payload.replace(/_/g, " ")}…`));
+    const unProactive = listen<string>("chat://proactive", (e) =>
+      setMessages((prev) => [...prev, { role: "assistant", content: e.payload }]),
+    );
     return () => {
-      unToken.then((f) => f());
-      unTool.then((f) => f());
+      for (const un of [unToken, unTool, unProactive]) un.then((f) => f());
     };
   }, []);
 
-  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, toolNote]);
+  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, toolNote, tab]);
 
   async function send() {
     const text = draft.trim();
@@ -45,7 +49,7 @@ export default function App() {
     setBusy(true);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     try {
-      await invoke<string>("send_message", { text });
+      await api.send(text);
     } catch (err) {
       setMessages((prev) => [...prev, { role: "error", content: String(err) }]);
     } finally {
@@ -66,36 +70,51 @@ export default function App() {
         </div>
       </header>
 
-      <section className="chat">
-        {messages.length === 0 && (
-          <div className="empty">Hey, I'm {name}. What are we focusing on today?</div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
-            {m.content}
-          </div>
-        ))}
-        {busy && (toolNote || messages[messages.length - 1]?.role === "user") && (
-          <div className="bubble assistant pending">{toolNote ?? "thinking…"}</div>
-        )}
-        <div ref={bottomRef} />
-      </section>
+      <FocusBar />
 
-      <form
-        className="composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          send();
-        }}
-      >
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={`Message ${name}…`}
-        />
-        <button disabled={busy || !draft.trim()}>Send</button>
-      </form>
+      <nav className="tabs">
+        <button className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>
+          Chat
+        </button>
+        <button className={tab === "tasks" ? "active" : ""} onClick={() => setTab("tasks")}>
+          Tasks{openTasks > 0 && <span className="badge">{openTasks}</span>}
+        </button>
+      </nav>
+
+      <div className={tab === "tasks" ? "pane" : "pane hidden"}>
+        <Tasks onCount={setOpenTasks} />
+      </div>
+
+      <div className={tab === "chat" ? "pane" : "pane hidden"}>
+        <section className="chat">
+          {messages.length === 0 && <div className="empty">Hey, I'm {name}. What are we focusing on today?</div>}
+          {messages.map((m, i) => (
+            <div key={i} className={`bubble ${m.role}`}>
+              {m.content}
+            </div>
+          ))}
+          {busy && (toolNote || messages[messages.length - 1]?.role === "user") && (
+            <div className="bubble assistant pending">{toolNote ?? "thinking…"}</div>
+          )}
+          <div ref={bottomRef} />
+        </section>
+
+        <form
+          className="composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send();
+          }}
+        >
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={`Message ${name}…`}
+          />
+          <button disabled={busy || !draft.trim()}>Send</button>
+        </form>
+      </div>
     </main>
   );
 }
