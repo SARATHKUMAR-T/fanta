@@ -161,6 +161,9 @@ export const api = {
   brainModels: (provider: Provider, key?: string) => invoke<string[]>("brain_models", { provider, key }),
   /** Sends the user's own text to the Teams chat a message came from; returns the chat's name. */
   teamsReply: (notificationId: number, text: string) => invoke<string>("teams_reply", { notificationId, text }),
+  soundsGet: () => invoke<boolean>("sounds_get"),
+  soundsSet: (on: boolean) => invoke<void>("sounds_set", { on }),
+  soundsPreview: (which: "focus" | "break") => invoke<void>("sounds_preview", { which }),
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   voiceInstall: () => invoke<void>("voice_install"),
   voiceListen: () => invoke<void>("voice_listen"),

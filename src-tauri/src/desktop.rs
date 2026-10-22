@@ -93,3 +93,86 @@ pub fn idle_ms() -> Option<u64> {
     let text = String::from_utf8_lossy(&out.stdout);
     text.split_whitespace().nth(1)?.trim_end_matches(",)").parse().ok()
 }
+
+/// Short chimes Fanta plays herself, so they sound the same on every desktop.
+#[derive(Clone, Copy)]
+pub enum Chime {
+    /// Rising three notes: a focus block is done, time for a break.
+    FocusDone,
+    /// Two notes: the break is over.
+    BreakDone,
+}
+
+const CHIME_RATE: u32 = 44_100;
+
+/// Bell-like tone: a few harmonics with a soft attack and exponential decay.
+fn synth_chime(chime: Chime) -> Vec<u8> {
+    // (start seconds, frequency Hz)
+    let notes: &[(f32, f32)] = match chime {
+        Chime::FocusDone => &[(0.0, 659.25), (0.16, 830.61), (0.32, 987.77)], // E5 G#5 B5
+        Chime::BreakDone => &[(0.0, 783.99), (0.2, 587.33)],                 // G5 D5
+    };
+    let length = notes.last().map(|n| n.0).unwrap_or(0.0) + 1.4;
+    let n = (length * CHIME_RATE as f32) as usize;
+    let mut buf = vec![0f32; n];
+    for &(start, freq) in notes {
+        let s0 = (start * CHIME_RATE as f32) as usize;
+        for i in s0..n {
+            let t = (i - s0) as f32 / CHIME_RATE as f32;
+            let attack = (t / 0.008).min(1.0);
+            let decay = (-t * 3.2).exp();
+            let tone = (2.0 * std::f32::consts::PI * freq * t).sin()
+                + 0.35 * (2.0 * std::f32::consts::PI * freq * 2.0 * t).sin() * (-t * 6.0).exp()
+                + 0.12 * (2.0 * std::f32::consts::PI * freq * 3.01 * t).sin() * (-t * 9.0).exp();
+            buf[i] += tone * attack * decay;
+        }
+    }
+    let peak = buf.iter().fold(0f32, |m, v| m.max(v.abs())).max(1e-6);
+    let gain = 0.32 / peak; // gentle, not startling
+    buf.iter().flat_map(|v| ((v * gain * 32767.0) as i16).to_le_bytes()).collect()
+}
+
+/// Plays a chime without blocking.
+pub fn chime(chime: Chime) {
+    std::thread::spawn(move || {
+        let pcm = synth_chime(chime);
+        let child = Command::new("aplay")
+            .args(["-q", "-f", "S16_LE", "-r", &CHIME_RATE.to_string(), "-c", "1", "-t", "raw", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        match child {
+            Ok(mut c) => {
+                if let Some(mut stdin) = c.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(&pcm);
+                }
+                let _ = c.wait();
+            }
+            Err(e) => eprintln!("chime: {e}"),
+        }
+    });
+}
+
+/// Whether chimes are on (Settings → Sounds; on by default).
+pub fn sounds_on(conn: &Connection) -> bool {
+    db::get_setting(conn, "sounds_enabled").ok().flatten().as_deref() != Some("0")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chimes_are_short_and_gentle() {
+        for c in [Chime::FocusDone, Chime::BreakDone] {
+            let pcm = synth_chime(c);
+            let samples: Vec<i16> = pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+            let secs = samples.len() as f32 / CHIME_RATE as f32;
+            let peak = samples.iter().map(|s| s.unsigned_abs()).max().unwrap();
+            assert!((1.4..2.0).contains(&secs), "{secs}s");
+            assert!((9_000..11_500).contains(&peak), "peak {peak}");
+            assert!(samples.last().unwrap().unsigned_abs() < 400, "ends quietly");
+        }
+    }
+}

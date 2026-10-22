@@ -90,9 +90,10 @@ pub fn stop(app: &AppHandle) -> anyhow::Result<bool> {
 pub fn tick(app: &AppHandle) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
     let p = &state.persona;
-    let finished = {
+    let (finished, sounds) = {
         let conn = state.db.lock().unwrap();
-        match db::active_session(&conn)? {
+        let sounds = desktop::sounds_on(&conn);
+        let finished = match db::active_session(&conn)? {
             Some(s) if s.ends_at <= db::now_ts() => {
                 db::end_session(&conn, s.id, true)?;
                 if s.kind == "focus" {
@@ -103,8 +104,16 @@ pub fn tick(app: &AppHandle) -> anyhow::Result<()> {
                 Some(s.kind)
             }
             _ => None,
-        }
+        };
+        (finished, sounds)
     };
+    if sounds {
+        match finished.as_deref() {
+            Some("focus") => desktop::chime(desktop::Chime::FocusDone),
+            Some(_) => desktop::chime(desktop::Chime::BreakDone),
+            None => {}
+        }
+    }
     match finished.as_deref() {
         Some("focus") => desktop::notify(
             &p.name,

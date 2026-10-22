@@ -13,6 +13,10 @@ pub struct ToolCall {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub function: ToolCallFunction,
+    /// Provider fields that must be echoed back with the call, e.g. Gemini's
+    /// `extra_content.google.thought_signature`. Never sent to Ollama.
+    #[serde(skip)]
+    pub extra: serde_json::Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

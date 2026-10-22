@@ -227,6 +227,7 @@ pub async fn anthropic_chat(
                 out.tool_calls.push(ToolCall {
                     id: block["id"].as_str().map(String::from),
                     function: ToolCallFunction { name: block["name"].as_str().unwrap_or("").to_string(), arguments: input },
+                    extra: Map::new(),
                 });
             }
             _ => {}
@@ -271,11 +272,18 @@ fn openai_messages(messages: &[Message]) -> Vec<Value> {
             "assistant" if !m.tool_calls.is_empty() => out.push(json!({
                 "role": "assistant",
                 "content": if m.content.is_empty() { Value::Null } else { json!(m.content) },
-                "tool_calls": m.tool_calls.iter().map(|c| json!({
-                    "id": c.id.clone().unwrap_or_default(),
-                    "type": "function",
-                    "function": { "name": c.function.name, "arguments": c.function.arguments.to_string() }
-                })).collect::<Vec<_>>()
+                "tool_calls": m.tool_calls.iter().map(|c| {
+                    let mut call = json!({
+                        "id": c.id.clone().unwrap_or_default(),
+                        "type": "function",
+                        "function": { "name": c.function.name, "arguments": c.function.arguments.to_string() }
+                    });
+                    // Echo provider extras unchanged (Gemini rejects tool calls without its thought signature).
+                    for (k, v) in &c.extra {
+                        call[k] = v.clone();
+                    }
+                    call
+                }).collect::<Vec<_>>()
             })),
             "assistant" => {
                 if !m.content.trim().is_empty() {
@@ -308,7 +316,8 @@ pub async fn openai_chat(
     }
     let mut out = Message::new("assistant", "");
     // Tool calls stream in pieces keyed by index: id and name first, then argument fragments.
-    let mut calls: BTreeMap<u64, (Option<String>, String, String)> = BTreeMap::new();
+    // Gemini omits `index`, sending each call whole; a new id then means a new call.
+    let mut calls: BTreeMap<u64, (Option<String>, String, String, Map<String, Value>)> = BTreeMap::new();
     for_each_sse(resp, |data| {
         if data == "[DONE]" {
             return Ok(false);
@@ -323,9 +332,26 @@ pub async fn openai_chat(
             out.content.push_str(t);
         }
         for tc in delta["tool_calls"].as_array().into_iter().flatten() {
-            let entry = calls.entry(tc["index"].as_u64().unwrap_or(0)).or_default();
-            if let Some(id) = tc["id"].as_str().filter(|s| !s.is_empty()) {
+            let id = tc["id"].as_str().filter(|s| !s.is_empty());
+            let key = match tc["index"].as_u64() {
+                Some(i) => i,
+                None => match (id, calls.iter().next_back()) {
+                    (Some(id), Some((&k, last))) if last.0.as_deref() == Some(id) => k,
+                    (Some(_), _) => calls.len() as u64,
+                    (None, Some((&k, _))) => k,
+                    (None, None) => 0,
+                },
+            };
+            let entry = calls.entry(key).or_default();
+            if let Some(id) = id {
                 entry.0 = Some(id.to_string());
+            }
+            if let Some(obj) = tc.as_object() {
+                for (k, v) in obj {
+                    if !["index", "id", "type", "function"].contains(&k.as_str()) {
+                        entry.3.insert(k.clone(), v.clone());
+                    }
+                }
             }
             if let Some(n) = tc["function"]["name"].as_str() {
                 entry.1.push_str(n);
@@ -337,7 +363,7 @@ pub async fn openai_chat(
         Ok(true)
     })
     .await?;
-    for (i, (id, name, args)) in calls {
+    for (i, (id, name, args, extra)) in calls {
         let arguments = if args.trim().is_empty() {
             json!({})
         } else {
@@ -346,6 +372,7 @@ pub async fn openai_chat(
         out.tool_calls.push(ToolCall {
             id: Some(id.unwrap_or_else(|| format!("call_{i}"))),
             function: ToolCallFunction { name, arguments },
+            extra,
         });
     }
     Ok(out)
@@ -382,7 +409,7 @@ mod tests {
     #[test]
     fn anthropic_history_shape() {
         let mut call = Message::new("assistant", "Checking.");
-        call.tool_calls.push(ToolCall { id: Some("toolu_1".into()), function: ToolCallFunction { name: "list_tasks".into(), arguments: json!({}) } });
+        call.tool_calls.push(ToolCall { id: Some("toolu_1".into()), function: ToolCallFunction { name: "list_tasks".into(), arguments: json!({}) }, extra: Map::new() });
         let mut result = Message::new("tool", "#1 report");
         result.tool_call_id = Some("toolu_1".into());
         let msgs = vec![
@@ -403,12 +430,48 @@ mod tests {
     #[test]
     fn openai_history_shape() {
         let mut call = Message::new("assistant", "");
-        call.tool_calls.push(ToolCall { id: Some("c1".into()), function: ToolCallFunction { name: "x".into(), arguments: json!({"a": 1}) } });
+        let mut extra = Map::new();
+        extra.insert("extra_content".into(), json!({ "google": { "thought_signature": "sig" } }));
+        call.tool_calls.push(ToolCall { id: Some("c1".into()), function: ToolCallFunction { name: "x".into(), arguments: json!({"a": 1}) }, extra });
         let mut result = Message::new("tool", "ok");
         result.tool_call_id = Some("c1".into());
         let out = openai_messages(&[Message::new("system", "s"), Message::new("user", "hi"), call, result]);
         assert_eq!(out[2]["tool_calls"][0]["function"]["arguments"], "{\"a\":1}");
         assert_eq!(out[2]["content"], Value::Null);
         assert_eq!(out[3]["tool_call_id"], "c1");
+        assert_eq!(out[2]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], "sig");
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    /// Uses the Gemini key saved in Fanta: `cargo test -- --ignored gemini_tool_loop --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn gemini_tool_loop() {
+        let key = keyring::Entry::new("fanta", "gemini-api-key").unwrap().get_password().unwrap();
+        let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3.5-flash".into());
+        let http = reqwest::Client::new();
+        let tools = vec![json!({ "type": "function", "function": {
+            "name": "start_focus", "description": "Start a focus block",
+            "parameters": { "type": "object", "properties": { "minutes": { "type": "integer" } } } } })];
+        let mut msgs = vec![Message::new("system", "Use tools when asked."), Message::new("user", "ok lets focus on something")];
+
+        let first = openai_chat(&http, GEMINI_URL, &key, &model, &msgs, &tools, |_| {}).await.unwrap();
+        assert!(!first.tool_calls.is_empty(), "expected a tool call, got {:?}", first.content);
+        println!("extras kept: {:?}", first.tool_calls[0].extra.keys().collect::<Vec<_>>());
+        let call = first.tool_calls[0].clone();
+        msgs.push(first);
+        let mut result = Message::new("tool", "Focus block started, ends at 18:30.");
+        result.tool_call_id = call.id.clone();
+        result.tool_name = Some(call.function.name.clone());
+        msgs.push(result);
+
+        // This second request is the one that failed with "missing a thought_signature".
+        let second = openai_chat(&http, GEMINI_URL, &key, &model, &msgs, &tools, |_| {}).await.unwrap();
+        println!("reply: {}", second.content);
+        assert!(!second.content.trim().is_empty());
     }
 }

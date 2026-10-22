@@ -13,6 +13,7 @@ import Chat from "./Chat";
 import { FocusPill, mmss, useFocusNote, useFocusStatus } from "./focus";
 import Brain from "./Brain";
 import Plugins from "./Plugins";
+import SoundSettings from "./SoundSettings";
 import VoiceSettings from "./VoiceSettings";
 import "./panel.css";
 
@@ -144,6 +145,7 @@ export default function Panel() {
             </div>
             <Brain />
             <VoiceSettings />
+            <SoundSettings />
             <Connections />
             <Plugins />
             <section className="card">

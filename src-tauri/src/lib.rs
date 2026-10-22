@@ -143,12 +143,23 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
     // Cloud models handle many tools well; the small local model gets only the plugins mentioned.
     schemas.extend(if cloud { state.plugins.all_schemas() } else { state.plugins.schemas_for(&routing_context) });
     let rounds = if cloud { MAX_TOOL_ROUNDS * 2 } else { MAX_TOOL_ROUNDS };
+    // What tools did this turn, so a failure afterwards doesn't hide that they ran.
+    let mut done: Vec<String> = vec![];
     for _ in 0..rounds {
-        let reply = brain::chat(&app, &messages, &schemas, |tok| {
+        let reply = match brain::chat(&app, &messages, &schemas, |tok| {
             let _ = app.emit("chat://token", tok);
         })
         .await
-        .map_err(|e| e.to_string())?;
+        {
+            Ok(r) => r,
+            Err(e) if !done.is_empty() => {
+                let content = format!("Done: {}\n\n(I couldn't finish my reply: {e})", done.join(" "));
+                let _ = app.emit("chat://token", &content);
+                db::insert_message(&state.db.lock().unwrap(), "assistant", &content).map_err(|e| e.to_string())?;
+                return Ok(content);
+            }
+            Err(e) => return Err(e.to_string()),
+        };
 
         if reply.tool_calls.is_empty() {
             let mut content = reply.content.trim().to_string();
@@ -172,6 +183,9 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
             } else {
                 dispatch(&app, &state, name, args).await
             };
+            if !result.starts_with("error") && !result.starts_with("The user") {
+                done.push(result.lines().next().unwrap_or("").to_string());
+            }
             let mut msg = Message::new("tool", result);
             msg.tool_name = Some(call.function.name);
             msg.tool_call_id = call.id;
@@ -422,6 +436,26 @@ async fn teams_reply(app: AppHandle, notification_id: i64, text: String) -> Resu
 }
 
 #[tauri::command]
+fn sounds_get(state: State<'_, AppState>) -> bool {
+    desktop::sounds_on(&state.db.lock().unwrap())
+}
+
+/// Turns chimes on/off; plays one when turning on so you hear what it sounds like.
+#[tauri::command]
+fn sounds_set(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    db::set_setting(&state.db.lock().unwrap(), "sounds_enabled", if on { "1" } else { "0" }).map_err(err)?;
+    if on {
+        desktop::chime(desktop::Chime::FocusDone);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn sounds_preview(which: String) {
+    desktop::chime(if which == "break" { desktop::Chime::BreakDone } else { desktop::Chime::FocusDone });
+}
+
+#[tauri::command]
 fn voice_status(app: AppHandle) -> voice::Status {
     voice::status(&app)
 }
@@ -605,7 +639,10 @@ pub fn run() {
             voice_stop,
             voice_set_mode,
             voice_should_speak,
-            teams_reply
+            teams_reply,
+            sounds_get,
+            sounds_set,
+            sounds_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
