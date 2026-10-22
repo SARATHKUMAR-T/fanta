@@ -6,6 +6,7 @@ mod focus;
 mod llm;
 mod notifications;
 mod persona;
+mod plugins;
 mod scheduler;
 mod tools;
 
@@ -28,6 +29,7 @@ pub struct AppState {
     pub tools: tools::Registry,
     pub calendar: calendar::Calendar,
     pub approvals: approvals::Approvals,
+    pub plugins: plugins::Host,
 }
 
 #[tauri::command]
@@ -44,6 +46,7 @@ fn get_history(state: State<'_, AppState>) -> Result<Vec<db::StoredMessage>, Str
 #[tauri::command]
 async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<String, String> {
     let mut messages = vec![];
+    let mut routing_context = String::new();
     // Takes the db lock itself, so it must run before we hold it below.
     let meetings = calendar::today_summary(&app);
     {
@@ -61,12 +64,18 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
             format!("{}\nOpen tasks:\n{tasks}\n{meetings}", state.persona.full_system_prompt()),
         ));
         let history = db::recent_messages(&conn, HISTORY_LIMIT).map_err(|e| e.to_string())?;
+        if let Some(prev) = history.iter().rev().find(|m| m.role == "user") {
+            routing_context = prev.content.clone();
+        }
         messages.extend(history.into_iter().map(|m| Message::new(&m.role, m.content)));
         db::insert_message(&conn, "user", &text).map_err(|e| e.to_string())?;
     }
-    messages.push(Message::new("user", text));
+    messages.push(Message::new("user", text.clone()));
 
-    let schemas = state.tools.schemas();
+    routing_context.push(' ');
+    routing_context.push_str(&text);
+    let mut schemas = state.tools.schemas();
+    schemas.extend(state.plugins.schemas_for(&routing_context));
     for _ in 0..MAX_TOOL_ROUNDS {
         let reply = state
             .ollama
@@ -86,28 +95,39 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         messages.push(reply);
         for call in calls {
             let (name, args) = (&call.function.name, &call.function.arguments);
-            let result = match state.tools.approval(&app, name, args) {
-                Some(Err(e)) => format!("error: {e}"),
-                Some(Ok(description)) => {
-                    let _ = app.emit("chat://tool", "waiting for your approval");
-                    if approvals::ask(&app, name, &description).await {
-                        let _ = app.emit("chat://tool", name);
-                        state.tools.call(&app, name, args).await
-                    } else {
-                        "The user declined this action. Acknowledge briefly; don't retry unless they ask.".into()
-                    }
-                }
-                None => {
-                    let _ = app.emit("chat://tool", name);
-                    state.tools.call(&app, name, args).await
-                }
-            };
+            let result = dispatch(&app, &state, name, args).await;
             let mut msg = Message::new("tool", result);
             msg.tool_name = Some(call.function.name);
             messages.push(msg);
         }
     }
     Err("Too many tool rounds; stopping.".into())
+}
+
+/// Runs one tool call (built-in or plugin), asking the user first when required.
+async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_json::Value) -> String {
+    let is_plugin = state.plugins.is_plugin_tool(name);
+    let approval = if is_plugin {
+        state.plugins.approval_text(name, args).map(Ok)
+    } else {
+        state.tools.approval(app, name, args)
+    };
+    match approval {
+        Some(Err(e)) => return format!("error: {e}"),
+        Some(Ok(description)) => {
+            let _ = app.emit("chat://tool", "waiting for your approval");
+            if !approvals::ask(app, name, &description).await {
+                return "The user declined this action. Acknowledge briefly; don't retry unless they ask.".into();
+            }
+        }
+        None => {}
+    }
+    let _ = app.emit("chat://tool", name);
+    if is_plugin {
+        state.plugins.call(name, args).await
+    } else {
+        state.tools.call(app, name, args).await
+    }
 }
 
 fn err(e: anyhow::Error) -> String {
@@ -232,6 +252,46 @@ fn open_link(url: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn plugins_info(state: State<'_, AppState>) -> Vec<plugins::PluginInfo> {
+    state.plugins.info()
+}
+
+#[tauri::command]
+async fn plugins_reload(app: AppHandle) -> Result<(), String> {
+    plugins::reload(&app).await.map_err(err)
+}
+
+#[tauri::command]
+async fn plugin_add(app: AppHandle, name: String, command: String, triggers: String) -> Result<(), String> {
+    plugins::add(&name, &command, &triggers).map_err(err)?;
+    plugins::reload(&app).await.map_err(err)
+}
+
+#[tauri::command]
+async fn plugin_remove(app: AppHandle, name: String) -> Result<(), String> {
+    plugins::remove(&name).map_err(err)?;
+    plugins::reload(&app).await.map_err(err)
+}
+
+#[tauri::command]
+async fn plugin_set_enabled(app: AppHandle, name: String, enabled: bool) -> Result<(), String> {
+    plugins::set_enabled(&name, enabled).map_err(err)?;
+    plugins::reload(&app).await.map_err(err)
+}
+
+/// Doesn't restart the plugin; takes effect on the next call.
+#[tauri::command]
+async fn plugin_set_auto_approve(app: AppHandle, name: String, tool: String, auto: bool) -> Result<(), String> {
+    plugins::set_auto_approve(&name, &tool, auto).map_err(err)?;
+    plugins::reload(&app).await.map_err(err)
+}
+
+#[tauri::command]
+fn open_config_dir() {
+    let _ = std::process::Command::new("xdg-open").arg(persona::config_dir()).spawn();
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -249,6 +309,7 @@ pub fn run() {
         tools: tools::Registry::with_builtins(),
         calendar: calendar::Calendar::default(),
         approvals: approvals::Approvals::default(),
+        plugins: plugins::Host::default(),
         persona,
     };
 
@@ -268,6 +329,12 @@ pub fn run() {
             scheduler::spawn(app.handle().clone());
             notifications::spawn(app.handle().clone());
             calendar::spawn(app.handle().clone());
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = plugins::reload(&handle).await {
+                    eprintln!("plugins: {e}");
+                }
+            });
 
             let show = MenuItem::with_id(app, "show", "Open Fanta", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -322,7 +389,14 @@ pub fn run() {
             calendar_disconnect,
             calendar_sync,
             calendar_events,
-            open_link
+            open_link,
+            plugins_info,
+            plugins_reload,
+            plugin_add,
+            plugin_remove,
+            plugin_set_enabled,
+            plugin_set_auto_approve,
+            open_config_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

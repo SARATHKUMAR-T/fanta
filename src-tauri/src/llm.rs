@@ -4,6 +4,9 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Room for history, tool definitions, and plugin output (~1.2 GB KV cache for a 4B model).
+const CONTEXT_TOKENS: u32 = 8192;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub function: ToolCallFunction,
@@ -65,6 +68,7 @@ impl Ollama {
             "messages": messages,
             "tools": tools,
             "stream": true,
+            "options": { "num_ctx": CONTEXT_TOKENS },
         });
         let resp = self
             .http
@@ -113,7 +117,7 @@ impl Ollama {
             "messages": messages,
             "format": schema,
             "stream": false,
-            "options": { "temperature": 0 },
+            "options": { "temperature": 0, "num_ctx": CONTEXT_TOKENS },
         });
         let resp = self
             .http
