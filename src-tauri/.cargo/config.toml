@@ -1,0 +1,6 @@
+# Speech recognition (whisper.cpp) builds with a project-local CMake
+# (scripts/setup-voice-tools.sh) and its pre-generated bindings, so no
+# system cmake or clang install is needed.
+[env]
+CMAKE = { value = ".tools/cmake/bin/cmake", relative = true }
+WHISPER_DONT_GENERATE_BINDINGS = "1"

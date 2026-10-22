@@ -27,7 +27,9 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .resizable(false)
+        // GTK doesn't resize the web content of a non-resizable window when we
+        // grow it for a speech bubble; it's frameless, so users can't resize it anyway.
+        .resizable(true)
         .visible_on_all_workspaces(true)
         .visible(false)
         .build()?;

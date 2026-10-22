@@ -50,6 +50,8 @@ export default function Panel() {
   const [openTasks, setOpenTasks] = useState(0);
   const [unseen, setUnseen] = useState(0);
   const note = useFocusNote();
+  // The panel window stays mounted while hidden; only count the Inbox as "read" when it's on screen.
+  const [shown, setShown] = useState(true);
   const mood = useMood();
   const name = persona?.name ?? "Fanta";
   const statusLine = useStatusLine(name, openTasks);
@@ -59,7 +61,7 @@ export default function Panel() {
     api.persona().then(setPersona);
     const refreshUnseen = () => api.inboxUnseen().then(setUnseen);
     refreshUnseen();
-    const subs = [listen("inbox://changed", refreshUnseen)];
+    const subs = [listen("inbox://changed", refreshUnseen), listen<boolean>("panel://visible", (e) => setShown(e.payload))];
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && api.hidePanel();
     window.addEventListener("keydown", onKey);
     return () => {
@@ -121,7 +123,7 @@ export default function Panel() {
           <Tasks onCount={onCount} />
         </div>
         <div className={view === "inbox" ? "view scroll" : "view hidden"}>
-          <Inbox visible={view === "inbox"} />
+          <Inbox visible={shown && view === "inbox"} />
         </div>
         <div className={view === "calendar" ? "view scroll" : "view hidden"}>
           <CalendarView onConnect={() => setView("settings")} />

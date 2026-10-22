@@ -33,6 +33,7 @@ urlencoding = "2"
 iana-time-zone = "0.1"
 shell-words = "1"
 tokio = { version = "1", features = ["time", "sync", "process", "io-util"] }
+whisper-rs = "0.16.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
