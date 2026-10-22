@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, ApprovalRequest, FocusStatus, InboxItem, parseTs, Persona } from "../api";
+import { api, ApprovalRequest, FocusStatus, InboxItem, parseTs, Persona, ReplyTarget } from "../api";
 import Character from "./Character";
 import { UI_EVENTS, useMood } from "./useMood";
 import "./character.css";
 import "./companion.css";
 
-type Bubble = { kind: "info" | "alert" | "message"; title?: string; meta?: string; text: string; more?: number };
+type Bubble = {
+  kind: "info" | "alert" | "message";
+  title?: string;
+  meta?: string;
+  text: string;
+  more?: number;
+  /** A Teams message that can be replied to. */
+  reply?: ReplyTarget;
+  /** An approval waiting for an answer. */
+  approvalId?: number;
+};
 
 const BUBBLE_MS = 12_000;
 const MESSAGE_BUBBLE_MS = 16_000;
@@ -91,6 +101,7 @@ export default function Companion() {
         meta: [n.chat, n.source].filter(Boolean).join(" · "),
         text: clip(n.text ?? n.body),
         more: worth.length - 1,
+        reply: n.source === "Teams" ? { id: n.id, sender: n.sender ?? n.title, chat: n.chat, text: n.text ?? n.body } : undefined,
       },
       MESSAGE_BUBBLE_MS,
     );
@@ -110,7 +121,16 @@ export default function Companion() {
     refreshFocus();
     refreshInbox();
     if (import.meta.env.DEV && location.search.includes("demoBubble")) {
-      say({ kind: "message", title: "💬 Akilesh", meta: "Aarthi Selvakumari, +3 · Teams", text: "customer grievance agent? or should we keep it generic", more: 2 }, 0);
+      say(
+        {
+          kind: "message",
+          title: "💬 Akilesh",
+          meta: "Aarthi Selvakumari, +3 · Teams",
+          text: "did you push the creator studio changes?",
+          reply: { id: 2, sender: "Akilesh", chat: "Aarthi Selvakumari, +3", text: "did you push the creator studio changes?" },
+        },
+        0,
+      );
     }
 
     const subs = [
@@ -121,7 +141,7 @@ export default function Companion() {
       ),
       listen<ApprovalRequest>("approval://request", (e) => {
         pendingApprovals.current.add(e.payload.id);
-        say({ kind: "alert", title: "Can I go ahead?", text: clip(e.payload.text, 140) }, 0);
+        say({ kind: "alert", title: "Can I go ahead?", text: clip(e.payload.text, 180), approvalId: e.payload.id }, 0);
       }),
       listen<{ id: number }>("approval://resolved", (e) => {
         pendingApprovals.current.delete(e.payload.id);
@@ -219,6 +239,32 @@ export default function Companion() {
           {bubble.meta && <div className="speech-meta">{bubble.meta}</div>}
           <div className="speech-text">{bubble.text}</div>
           {!!bubble.more && <div className="speech-more">+{bubble.more} more · open chat</div>}
+          {(bubble.reply || bubble.approvalId) && (
+            <div className="speech-actions" onClick={(e) => e.stopPropagation()}>
+              {bubble.reply && (
+                <button
+                  className="speech-btn primary"
+                  onClick={async () => {
+                    say(null);
+                    await emit("ui://reply-to", bubble.reply);
+                    if (!panelOpenRef.current) api.togglePanel();
+                  }}
+                >
+                  ↩ Reply
+                </button>
+              )}
+              {bubble.approvalId && (
+                <>
+                  <button className="speech-btn primary" onClick={() => api.answerApproval(bubble.approvalId!, true)}>
+                    Approve
+                  </button>
+                  <button className="speech-btn" onClick={() => api.answerApproval(bubble.approvalId!, false)}>
+                    Not now
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

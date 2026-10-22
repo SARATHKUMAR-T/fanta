@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { api, Category, friendlyTime, InboxItem } from "./api";
 
 type Filter = "all" | Category;
@@ -74,6 +74,14 @@ export default function Inbox({ visible }: { visible: boolean }) {
             </div>
             <div className="notif-title">{n.text ?? n.body}</div>
             {n.summary && n.category !== "pending" && <div className="notif-raw muted">Fanta: {n.summary}</div>}
+            {n.source === "Teams" && (
+              <button
+                className="btn soft small reply-btn"
+                onClick={() => emit("ui://reply-to", { id: n.id, sender: n.sender ?? n.title, chat: n.chat, text: n.text ?? n.body })}
+              >
+                ↩ Reply
+              </button>
+            )}
           </li>
         ))}
       </ul>

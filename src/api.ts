@@ -94,6 +94,9 @@ export type DeviceCode = {
 
 export type ApprovalRequest = { id: number; tool: string; text: string };
 
+/** Which message a reply box is answering. Sent as the "ui://reply-to" event. */
+export type ReplyTarget = { id: number; sender: string; chat: string | null; text: string };
+
 export type PluginTool = { name: string; description: string; read_only: boolean; auto_approve: boolean };
 
 export type PluginInfo = {
@@ -156,6 +159,8 @@ export const api = {
   brainConfigure: (provider: Provider, model: string | null, background: boolean) =>
     invoke<void>("brain_configure", { provider, model, background }),
   brainModels: (provider: Provider, key?: string) => invoke<string[]>("brain_models", { provider, key }),
+  /** Sends the user's own text to the Teams chat a message came from; returns the chat's name. */
+  teamsReply: (notificationId: number, text: string) => invoke<string>("teams_reply", { notificationId, text }),
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   voiceInstall: () => invoke<void>("voice_install"),
   voiceListen: () => invoke<void>("voice_listen"),

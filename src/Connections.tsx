@@ -66,7 +66,7 @@ export default function Connections() {
     <section className="conn">
       <div className="card">
         <div className="card-title">
-          <span>📅 Outlook calendar</span>
+          <span>📅 Microsoft 365 · Outlook + Teams</span>
           {connected && <span className="chip ok">{status.provider === "graph" ? "connected" : "read-only"}</span>}
         </div>
 
@@ -101,7 +101,10 @@ export default function Connections() {
         ) : (
           <>
             <h3>Sign in with Microsoft</h3>
-            <p className="muted">Full access: live calendar, Teams join links, and Fanta can create or answer invites (always asks you first).</p>
+            <p className="muted">
+              One sign-in for your Outlook calendar and Teams chats: meeting heads-ups, creating or answering invites, and replying to Teams messages. Fanta
+              always asks before sending anything.
+            </p>
             <label>
               Application (client) ID
               <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" />
@@ -128,7 +131,8 @@ export default function Connections() {
                   Authentication → Advanced settings → <b>Allow public client flows: Yes</b> → Save.
                 </li>
                 <li>
-                  API permissions → Add → Microsoft Graph → Delegated: <b>Calendars.ReadWrite</b>, <b>User.Read</b>, <b>offline_access</b>.
+                  API permissions → Add → Microsoft Graph → Delegated: <b>Calendars.ReadWrite</b>, <b>Chat.ReadBasic</b>, <b>ChatMessage.Send</b>,{" "}
+                  <b>User.Read</b>, <b>offline_access</b>.
                 </li>
                 <li>
                   Copy the <b>Application (client) ID</b> and <b>Directory (tenant) ID</b> from Overview into the fields above.

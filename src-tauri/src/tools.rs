@@ -176,6 +176,34 @@ impl Registry {
                     |app, args| Box::pin(async move { respond_to_event(&app, &args).await }),
                     Some(describe_response),
                 ),
+                async_tool(
+                    "teams_send_message",
+                    "Send a Teams chat message to a person (their 1:1 chat) or an existing chat by its name. The user sees the exact text and chat and must approve before it's sent.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "to": { "type": "string", "description": "Person's name, or the chat name as shown in recent messages, e.g. 'Aarthi Selvakumari, +3'" },
+                            "message": { "type": "string", "description": "The exact message to send, written as the user (first person)" }
+                        },
+                        "required": ["to", "message"]
+                    }),
+                    |app, args| Box::pin(async move { teams_send(&app, &args).await }),
+                    None,
+                ),
+                async_tool(
+                    "teams_reply",
+                    "Reply on Teams in the chat where a recent message came from (group or 1:1). Use this for 'reply to X' about a message they sent. The user must approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "message": { "type": "string", "description": "The exact reply, written as the user (first person)" },
+                            "sender": { "type": "string", "description": "Who sent the message being replied to. Omit for the latest Teams message." }
+                        },
+                        "required": ["message"]
+                    }),
+                    |app, args| Box::pin(async move { teams_reply(&app, &args).await }),
+                    None,
+                ),
                 tool(
                     "list_notifications",
                     "List desktop notifications Fanta captured (Teams, Slack, mail...), newest first, with Fanta's triage. Use for 'what did I miss?'.",
@@ -629,6 +657,54 @@ async fn respond_to_event(app: &AppHandle, args: &Value) -> anyhow::Result<Strin
     let e = resolve_event(app, args)?;
     calendar::respond(app, &e, response, arg_str(args, "comment").unwrap_or("")).await?;
     Ok(format!("{done} “{}” ({}).", e.subject, friendly(&e.start_at)))
+}
+
+// ---- Teams ----
+
+/// Shows the exact chat and text, and sends only if the user approves.
+async fn confirm_and_send(app: &AppHandle, chat: &crate::teams::Chat, message: &str) -> anyhow::Result<String> {
+    let kind = if chat.kind == "oneOnOne" { "chat" } else { "group chat" };
+    let description = format!("Send on Teams to “{}” ({kind}):\n“{}”", chat.label(), message.trim());
+    let _ = app.emit("chat://tool", "waiting for your approval");
+    if !crate::approvals::ask(app, "teams", &description).await {
+        return Ok("The user chose not to send it. Don't retry unless they ask; offer to change the wording.".into());
+    }
+    crate::teams::send(app, chat, message).await?;
+    Ok(format!("Sent to {} on Teams.", chat.label()))
+}
+
+async fn teams_send(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    let to = arg_str(args, "to").ok_or_else(|| anyhow::anyhow!("who should it go to?"))?;
+    let message = arg_str(args, "message").ok_or_else(|| anyhow::anyhow!("what should the message say?"))?;
+    let chats = crate::teams::chats(app, false).await?;
+    let chat = match crate::teams::resolve(&chats, to) {
+        Ok(c) => c.clone(),
+        Err(_) => crate::teams::resolve(&crate::teams::chats(app, true).await?, to)?.clone(),
+    };
+    confirm_and_send(app, &chat, message).await
+}
+
+async fn teams_reply(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
+    let message = arg_str(args, "message").ok_or_else(|| anyhow::anyhow!("what should the reply say?"))?;
+    let sender = arg_str(args, "sender").map(str::to_lowercase);
+    let n = {
+        let state = app.state::<AppState>();
+        let conn = state.db.lock().unwrap();
+        db::list_notifications(&conn, None, None, 60)?
+            .into_iter()
+            .filter(|n| n.source == "Teams" && n.category != "ignore")
+            .find(|n| match &sender {
+                Some(s) => n.sender.as_deref().unwrap_or(&n.title).to_lowercase().contains(s.as_str()),
+                None => true,
+            })
+            .ok_or_else(|| anyhow::anyhow!("no recent Teams message from {}", sender.as_deref().unwrap_or("anyone")))?
+    };
+    let chats = crate::teams::chats(app, false).await?;
+    let chat = match crate::teams::chat_for_notification(&chats, &n) {
+        Ok(c) => c.clone(),
+        Err(_) => crate::teams::chat_for_notification(&crate::teams::chats(app, true).await?, &n)?.clone(),
+    };
+    confirm_and_send(app, &chat, message).await
 }
 
 #[cfg(test)]

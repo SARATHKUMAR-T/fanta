@@ -7,8 +7,10 @@ use serde_json::{json, Value};
 
 use crate::db::{self, NewCalEvent};
 
-const SCOPES: &str = "offline_access User.Read Calendars.ReadWrite";
-const GRAPH: &str = "https://graph.microsoft.com/v1.0";
+/// Calendar plus Teams chats (find chats, send in them). None of these need admin
+/// consent by default, though a tenant can still require it.
+const SCOPES: &str = "offline_access User.Read Calendars.ReadWrite Chat.ReadBasic ChatMessage.Send";
+pub const GRAPH: &str = "https://graph.microsoft.com/v1.0";
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -139,7 +141,7 @@ pub async fn refresh(http: &reqwest::Client, app: &App, refresh_token: &str) -> 
     Ok(serde_json::from_str(&body)?)
 }
 
-async fn get_json(http: &reqwest::Client, token: &str, url: &str) -> anyhow::Result<Value> {
+pub async fn get_json(http: &reqwest::Client, token: &str, url: &str) -> anyhow::Result<Value> {
     let resp = http.get(url).bearer_auth(token).send().await?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);

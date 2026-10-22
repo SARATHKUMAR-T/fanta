@@ -54,7 +54,7 @@ fn set(app: &AppHandle, key: &str, value: &str) -> anyhow::Result<()> {
     db::set_setting(&app.state::<AppState>().db.lock().unwrap(), key, value)
 }
 
-fn provider(app: &AppHandle) -> String {
+pub fn provider(app: &AppHandle) -> String {
     setting(app, PROVIDER).unwrap_or_else(|| "none".into())
 }
 
@@ -135,7 +135,7 @@ async fn sync(app: &AppHandle) -> anyhow::Result<()> {
 }
 
 /// A valid Graph access token, refreshing (and rotating the stored refresh token) as needed.
-async fn access_token(app: &AppHandle) -> anyhow::Result<String> {
+pub async fn access_token(app: &AppHandle) -> anyhow::Result<String> {
     let cal = &app.state::<AppState>().calendar;
     if let Some((token, expires)) = cal.token.lock().unwrap().clone() {
         if expires > Instant::now() + std::time::Duration::from_secs(60) {

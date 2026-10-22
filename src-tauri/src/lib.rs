@@ -10,6 +10,7 @@ mod notifications;
 mod persona;
 mod plugins;
 mod scheduler;
+mod teams;
 mod tools;
 mod voice;
 mod windows;
@@ -39,6 +40,7 @@ pub struct AppState {
     pub approvals: approvals::Approvals,
     pub plugins: plugins::Host,
     pub voice: voice::Voice,
+    pub teams: teams::Teams,
 }
 
 #[tauri::command]
@@ -365,6 +367,13 @@ async fn brain_models(app: AppHandle, provider: String, key: Option<String>) -> 
     brain::list_models(&app, &provider, key.as_deref()).await.map_err(err)
 }
 
+/// Sends text the user wrote in a reply box; clicking Send is their approval.
+/// Returns the chat's name.
+#[tauri::command]
+async fn teams_reply(app: AppHandle, notification_id: i64, text: String) -> Result<String, String> {
+    teams::reply_to_notification(&app, notification_id, &text).await.map_err(err)
+}
+
 #[tauri::command]
 fn voice_status(app: AppHandle) -> voice::Status {
     voice::status(&app)
@@ -433,6 +442,7 @@ pub fn run() {
         approvals: approvals::Approvals::default(),
         plugins: plugins::Host::default(),
         voice: voice::Voice::default(),
+        teams: teams::Teams::default(),
         persona,
     };
 
@@ -547,7 +557,8 @@ pub fn run() {
             voice_speak,
             voice_stop,
             voice_set_mode,
-            voice_should_speak
+            voice_should_speak,
+            teams_reply
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
-import { api, ApprovalRequest } from "../api";
+import { api, ApprovalRequest, ReplyTarget } from "../api";
 import Character from "../companion/Character";
 import { UI_EVENTS } from "../companion/useMood";
 import { MicIcon, SendIcon, ShieldIcon } from "../ui/Icons";
@@ -57,6 +57,11 @@ export default function Chat({ name }: { name: string }) {
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
   const [voiceSetup, setVoiceSetup] = useState<{ installing: boolean; progress?: string; error?: string } | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(() =>
+    import.meta.env.DEV && location.search.includes("replyDemo")
+      ? { id: 2, sender: "Akilesh", chat: "Aarthi Selvakumari, +3", text: "did you push the creator studio changes?" }
+      : null,
+  );
   // Event listeners are registered once, so they reach the latest send() through a ref.
   const sendRef = useRef<(text: string, byVoice: boolean) => void>(() => {});
 
@@ -84,6 +89,11 @@ export default function Chat({ name }: { name: string }) {
         ),
       ),
       listen<boolean>("panel://visible", (e) => e.payload && setTimeout(() => inputRef.current?.focus(), 50)),
+      listen<ReplyTarget>("ui://reply-to", (e) => {
+        setReplyTo(e.payload);
+        setTimeout(() => inputRef.current?.focus(), 80);
+      }),
+      listen<string>("chat://note", (e) => setMessages((prev) => [...prev, { role: "assistant", content: e.payload }])),
       listen<VoiceState>("voice://state", (e) => {
         setVoice(e.payload);
         if (e.payload === "listening") setVoiceNote(null);
@@ -110,9 +120,28 @@ export default function Chat({ name }: { name: string }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, toolNote, busy]);
 
+  /** Reply box mode: the user's exact words go straight to that Teams chat. */
+  async function sendReply(target: ReplyTarget, text: string) {
+    setBusy(true);
+    setToolNote("Sending on Teams");
+    try {
+      await api.teamsReply(target.id, text);
+      setDraft("");
+      setReplyTo(null);
+      emit(UI_EVENTS.userMessage, text);
+    } catch (err) {
+      setMessages((prev) => [...prev, { role: "error", content: String(err) }]);
+      emit(UI_EVENTS.error);
+    } finally {
+      setBusy(false);
+      setToolNote(null);
+    }
+  }
+
   async function send(textArg?: string, byVoice = false) {
     const text = (textArg ?? draft).trim();
     if (!text || busy) return;
+    if (replyTo && !byVoice) return sendReply(replyTo, text);
     setDraft("");
     setBusy(true);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
@@ -260,6 +289,20 @@ export default function Chat({ name }: { name: string }) {
         <div ref={bottomRef} />
       </div>
 
+      {replyTo && (
+        <div className="reply-chip">
+          <div className="reply-chip-body">
+            <div className="reply-chip-to">
+              ↩ Reply on Teams to <b>{replyTo.sender}</b>
+              {replyTo.chat && <span className="muted"> in {replyTo.chat}</span>}
+            </div>
+            <div className="reply-chip-quote">“{replyTo.text}”</div>
+          </div>
+          <button className="icon-btn" title="Cancel reply" onClick={() => setReplyTo(null)}>
+            ×
+          </button>
+        </div>
+      )}
       <form
         className="composer"
         onSubmit={(e) => {
@@ -283,7 +326,7 @@ export default function Chat({ name }: { name: string }) {
           rows={1}
           autoFocus
           value={draft}
-          placeholder={`Message ${name}…`}
+          placeholder={replyTo ? `Reply to ${replyTo.sender}…` : `Message ${name}…`}
           onChange={(e) => {
             setDraft(e.target.value);
             // Let Fanta "listen" while you type (at most once a second).
