@@ -49,16 +49,44 @@ function gaze(mood: Mood): { dx: number; dy: number; wide: number; pupil: number
     case "listening":
       return { dx: -2.5, dy: 2.5, wide: 1, pupil: 1 };
     case "sad":
-      return { dx: 0, dy: 2.5, wide: 0.95, pupil: 1 };
+      return { dx: 0, dy: 3, wide: 1, pupil: 1.02 };
     case "surprised":
-      return { dx: 0, dy: 0, wide: 1.15, pupil: 0.7 };
+      return { dx: 0, dy: 0, wide: 1.15, pupil: 0.68 };
     case "alert":
-      return { dx: 0, dy: 0, wide: 1.1, pupil: 0.85 };
+      return { dx: 0, dy: 0, wide: 1.1, pupil: 0.82 };
     case "worried":
-      return { dx: -1.5, dy: 0.5, wide: 0.97, pupil: 0.9 };
+      return { dx: -1.5, dy: 1, wide: 1, pupil: 0.9 };
+    case "wave":
+      return { dx: 0, dy: -0.5, wide: 1.05, pupil: 1.04 };
     default:
       return { dx: 0, dy: 0, wide: 1, pupil: 1 };
   }
+}
+
+/**
+ * Upper-lid line for moods that show emotion through the eyelids, as heights
+ * (relative to the eye centre) at the outer and inner corners. The eye above
+ * the line is covered with skin, so the eye itself changes shape.
+ */
+function lid(mood: Mood): { outer: number; inner: number } | null {
+  switch (mood) {
+    case "focus":
+      return { outer: -5, inner: -6 }; // flat, half-closed: determined
+    case "thinking":
+      return { outer: -9, inner: -8 }; // slight squint
+    case "worried":
+      return { outer: -5, inner: -12 }; // inner corners pulled up
+    case "sad":
+      return { outer: -1, inner: -11 }; // drooping outward
+    default:
+      return null;
+  }
+}
+
+/** A four-point star, for sparkling eyes. */
+function star(cx: number, cy: number, r: number) {
+  const k = r * 0.22;
+  return `M${cx} ${cy - r} Q${cx + k} ${cy - k} ${cx + r} ${cy} Q${cx + k} ${cy + k} ${cx} ${cy + r} Q${cx - k} ${cy + k} ${cx - r} ${cy} Q${cx - k} ${cy - k} ${cx} ${cy - r} Z`;
 }
 
 function Eye({ x, mood }: { x: number; mood: Mood }) {
@@ -88,6 +116,10 @@ function Eye({ x, mood }: { x: number; mood: Mood }) {
     );
   }
   const { dx, dy, wide: k, pupil } = gaze(mood);
+  const l = lid(mood);
+  const starry = mood === "wave" || mood === "surprised";
+  // Lid corners: the outer corner is on the left for the left eye, mirrored for the right.
+  const [ly1, ly2] = l ? (left ? [EY + l.outer, EY + l.inner] : [EY + l.inner, EY + l.outer]) : [0, 0];
   return (
     <g className="eye" style={{ transformOrigin: `${x}px ${EY}px` }}>
       <ellipse cx={x} cy={EY} rx={13 * k} ry={15.5 * k} fill="#fff" />
@@ -99,13 +131,30 @@ function Eye({ x, mood }: { x: number; mood: Mood }) {
           fill="#4a1d0c"
           opacity={0.45}
         />
-        <circle cx={x - 4 + dx} cy={EY - 5 + dy} r={4} fill="#fff" />
-        <circle cx={x + 4.5 + dx} cy={EY + 7 + dy} r={2} fill="#fff" opacity={0.9} />
+        {starry ? (
+          <>
+            <path className="eye-star" d={star(x - 3 + dx, EY - 4 + dy, 8)} fill="#fff" style={{ transformOrigin: `${x - 3 + dx}px ${EY - 4 + dy}px` }} />
+            <path d={star(x + 5 + dx, EY + 6 + dy, 3.5)} fill="#fff" opacity={0.9} />
+          </>
+        ) : (
+          <circle cx={x - 4 + dx} cy={EY - 5 + dy} r={4} fill="#fff" />
+        )}
+        <circle cx={x + 4.5 + dx} cy={EY + 7 + dy} r={mood === "sad" ? 2.8 : 2} fill="#fff" opacity={0.9} className={mood === "sad" ? "wobble" : undefined} />
         <circle cx={x + 5.5 + dx} cy={EY - 6 + dy} r={1.3} fill="#fff" opacity={0.8} />
       </g>
-      {/* upper lash: an even arc with a small flick at the outer corner; thin lower lash */}
-      <path d={`M${x - 13.5} ${EY - 5} Q${x} ${EY - 20} ${x + 13.5} ${EY - 5}`} fill="none" stroke={LINE} strokeWidth={3.8} strokeLinecap="round" />
-      <path d={left ? `M${x - 13.5} ${EY - 5} q-3 -1 -5 -4` : `M${x + 13.5} ${EY - 5} q3 -1 5 -4`} fill="none" stroke={LINE} strokeWidth={2.6} strokeLinecap="round" />
+      {l ? (
+        <>
+          {/* skin-coloured lid covering the top of the eye, with the lash along its edge */}
+          <path d={`M${x - 17} ${EY - 22} L${x + 17} ${EY - 22} L${x + 17} ${ly2} L${x - 17} ${ly1} Z`} fill="url(#skin)" />
+          <path d={`M${x - 13.5} ${ly1 + (left ? 1 : 0)} L${x + 13.5} ${ly2 + (left ? 0 : 1)}`} fill="none" stroke={LINE} strokeWidth={3.8} strokeLinecap="round" />
+        </>
+      ) : (
+        <>
+          {/* upper lash: an even arc with a small flick at the outer corner */}
+          <path d={`M${x - 13.5} ${EY - 5} Q${x} ${EY - 20} ${x + 13.5} ${EY - 5}`} fill="none" stroke={LINE} strokeWidth={3.8} strokeLinecap="round" />
+          <path d={left ? `M${x - 13.5} ${EY - 5} q-3 -1 -5 -4` : `M${x + 13.5} ${EY - 5} q3 -1 5 -4`} fill="none" stroke={LINE} strokeWidth={2.6} strokeLinecap="round" />
+        </>
+      )}
       <path d={`M${x - 7} ${EY + 15.5} Q${x} ${EY + 17.5} ${x + 7} ${EY + 15.5}`} fill="none" stroke={LINE} strokeWidth={1.3} strokeLinecap="round" opacity={0.55} />
     </g>
   );
@@ -272,11 +321,14 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           </g>
         )}
 
-        <g className="eyes">
-          <Eye x={77} mood={mood} />
-          <Eye x={123} mood={mood} />
+        {/* keyed by mood so each new expression eases in instead of snapping */}
+        <g key={mood} className="face-pop">
+          <g className="eyes">
+            <Eye x={77} mood={mood} />
+            <Eye x={123} mood={mood} />
+          </g>
+          <Mouth mood={mood} />
         </g>
-        <Mouth mood={mood} />
 
         {/* bangs */}
         <path
@@ -316,17 +368,6 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           </g>
         )}
       </g>
-
-      {/* raised arm (sleeve + hand) for waving and cheering, in front of the hair */}
-      {(mood === "wave" || mood === "proud") && (
-        <g className={mood === "wave" ? "hand waving" : "hand cheer"}>
-          <path d="M138 198 C146 184 153 172 160 162" stroke="#e2c4a6" strokeWidth={17} strokeLinecap="round" fill="none" />
-          <path d="M138 198 C146 184 153 172 160 162" stroke="#fff6ec" strokeWidth={14} strokeLinecap="round" fill="none" />
-          <path d="M152 170 l9 5" stroke="#ff8a3d" strokeWidth={3} strokeLinecap="round" />
-          <circle cx={162} cy={154} r={9.5} fill="#ffe3d3" stroke="#e8b89c" strokeWidth={1.4} />
-          <path d="M156 147 q2 -5 5.5 -1.5 M161.5 145.5 q2.5 -5 5.5 -1" stroke="#e8b89c" strokeWidth={1.4} fill="none" strokeLinecap="round" />
-        </g>
-      )}
 
       {mood === "thinking" && (
         <g className="thought" fill="#fff" stroke="#e9cdb2" strokeWidth={1.5}>

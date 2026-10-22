@@ -5,6 +5,9 @@ import "./companion/character.css";
 const moods: Mood[] = ["idle", "happy", "talking", "thinking", "focus", "alert", "sleepy", "surprised", "proud", "love", "sad", "wink", "listening", "worried", "wave"];
 
 export default function Preview() {
+  // ?mood=wave renders just that one, large.
+  const only = new URLSearchParams(location.search).get("mood") as Mood | null;
+  if (only) return <Character mood={only} size={300} />;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 24, padding: 24, background: "#f3eee8", fontFamily: "sans-serif" }}>
       {moods.map((m) => (
