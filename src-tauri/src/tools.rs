@@ -217,6 +217,29 @@ impl Registry {
                     list_notifications,
                 ),
                 tool(
+                    "start_break",
+                    "Start a break now (short or long). Ends a running focus block early.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "long": { "type": "boolean", "description": "Long break instead of short" },
+                            "minutes": { "type": "integer", "description": "Optional custom length" }
+                        }
+                    }),
+                    |app, args| {
+                        let long = args.get("long").and_then(Value::as_bool);
+                        let minutes = arg_i64(args, "minutes").map(|m| m as u32);
+                        let s = focus::start_break(app, long, minutes)?;
+                        Ok(format!("{} started, ends at {}.", if s.kind == "long_break" { "Long break" } else { "Break" }, friendly(&s.ends_at)))
+                    },
+                ),
+                tool(
+                    "pomodoro_stats",
+                    "The user's pomodoro history and analytics: today vs daily goal, this week per day, streak, last 30 days, top tasks, best hours.",
+                    json!({ "type": "object", "properties": {} }),
+                    |app, _| Ok(crate::stats::summary(&focus::analytics(app)?)),
+                ),
+                tool(
                     "focus_status",
                     "Check whether a focus block or break is running, and how many blocks were done today.",
                     json!({ "type": "object", "properties": {} }),
@@ -433,13 +456,19 @@ fn focus_status(app: &AppHandle, _: &Value) -> anyhow::Result<String> {
     let st = focus::status(app)?;
     Ok(match st.active {
         Some(s) => format!(
-            "A {} is running until {}{}. Focus blocks done today: {}.",
-            if s.kind == "focus" { "focus block" } else { "break" },
+            "A {} is {} until {}{}. Pomodoros done today: {} of {}.",
+            match s.kind.as_str() {
+                "focus" => "focus block",
+                "long_break" => "long break",
+                _ => "break",
+            },
+            if s.paused_at.is_some() { "paused (was due to end" } else { "running" },
             friendly(&s.ends_at),
             st.task_title.map(|t| format!(" (task: {t})")).unwrap_or_default(),
-            st.blocks_today
+            st.blocks_today,
+            st.config.daily_goal
         ),
-        None => format!("Nothing running. Focus blocks done today: {}.", st.blocks_today),
+        None => format!("Nothing running. Pomodoros done today: {} of {}.", st.blocks_today, st.config.daily_goal),
     })
 }
 

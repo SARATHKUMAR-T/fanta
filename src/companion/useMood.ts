@@ -41,10 +41,10 @@ export function useMood(): Mood {
     const refreshBase = async () => {
       const f = await api.focusStatus();
       const kind = f.active?.kind ?? null;
-      if (lastKind === "focus" && kind === "break") react("proud", 3500); // finished a block
+      if (lastKind === "focus" && kind !== null && kind !== "focus") react("proud", 3500); // finished a block
       lastKind = kind;
       const h = new Date().getHours();
-      setBase(kind === "focus" ? "focus" : h >= 23 || h < 6 ? "sleepy" : "idle");
+      setBase(kind === "focus" && !f.active?.paused_at ? "focus" : h >= 23 || h < 6 ? "sleepy" : "idle");
     };
     const refreshTasks = async () => {
       const n = (await api.listTasks(false)).length;

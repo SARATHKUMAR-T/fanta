@@ -10,6 +10,7 @@ mod notifications;
 mod persona;
 mod plugins;
 mod scheduler;
+mod stats;
 mod teams;
 mod tools;
 mod voice;
@@ -289,6 +290,42 @@ fn focus_status(app: AppHandle) -> Result<focus::FocusStatus, String> {
 /// Returns a note if the block was shortened for a meeting.
 fn start_focus(app: AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> Result<Option<String>, String> {
     focus::start(&app, minutes, task_id).map(|(_, note)| note).map_err(err)
+}
+
+/// `long` None picks short/long by the cycle; `minutes` None uses the configured length.
+#[tauri::command]
+fn start_break(app: AppHandle, long: Option<bool>, minutes: Option<u32>) -> Result<(), String> {
+    focus::start_break(&app, long, minutes).map(|_| ()).map_err(err)
+}
+
+#[tauri::command]
+fn pause_focus(app: AppHandle) -> Result<(), String> {
+    focus::pause(&app).map_err(err)
+}
+
+#[tauri::command]
+fn resume_focus(app: AppHandle) -> Result<(), String> {
+    focus::resume(&app).map_err(err)
+}
+
+#[tauri::command]
+fn extend_focus(app: AppHandle, minutes: i64) -> Result<(), String> {
+    focus::extend(&app, minutes).map_err(err)
+}
+
+#[tauri::command]
+fn skip_focus(app: AppHandle) -> Result<(), String> {
+    focus::skip(&app).map_err(err)
+}
+
+#[tauri::command]
+fn focus_stats(app: AppHandle) -> Result<stats::Stats, String> {
+    focus::analytics(&app).map_err(err)
+}
+
+#[tauri::command]
+fn pomodoro_config_set(app: AppHandle, config: focus::Config) -> Result<(), String> {
+    focus::set_config(&app, &config).map_err(err)
 }
 
 #[tauri::command]
@@ -606,6 +643,13 @@ pub fn run() {
             focus_status,
             start_focus,
             stop_focus,
+            start_break,
+            pause_focus,
+            resume_focus,
+            extend_focus,
+            skip_focus,
+            focus_stats,
+            pomodoro_config_set,
             list_notifications,
             inbox_unseen,
             mark_inbox_seen,

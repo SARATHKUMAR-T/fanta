@@ -29,10 +29,22 @@ export type Task = {
 
 export type FocusSession = {
   id: number;
-  kind: "focus" | "break";
+  kind: "focus" | "short_break" | "long_break";
   task_id: number | null;
   started_at: string;
   ends_at: string;
+  planned_minutes: number;
+  paused_at: string | null;
+};
+
+export type PomodoroConfig = {
+  focus_minutes: number;
+  short_break_minutes: number;
+  long_break_minutes: number;
+  long_break_every: number;
+  daily_goal: number;
+  auto_start_breaks: boolean;
+  auto_start_focus: boolean;
 };
 
 export type FocusStatus = {
@@ -41,6 +53,31 @@ export type FocusStatus = {
   blocks_today: number;
   focus_minutes: number;
   break_minutes: number;
+  config: PomodoroConfig;
+  cycle_done: number;
+  next_break: "short_break" | "long_break";
+};
+
+export type FocusStats = {
+  today: { pomodoros: number; focus_minutes: number; break_minutes: number; interrupted: number; goal: number };
+  week: { date: string; label: string; pomodoros: number; minutes: number; is_today: boolean }[];
+  week_pomodoros: number;
+  week_minutes: number;
+  streak: number;
+  best_streak: number;
+  last30: { pomodoros: number; focus_minutes: number; completion_rate: number; active_days: number; avg_per_active_day: number };
+  by_task: { title: string; pomodoros: number; minutes: number }[];
+  by_hour: number[];
+  history: {
+    id: number;
+    kind: FocusSession["kind"];
+    task_title: string | null;
+    started_at: string;
+    ended_at: string | null;
+    planned_minutes: number;
+    actual_minutes: number;
+    completed: boolean;
+  }[];
 };
 
 export type Category = "urgent" | "fyi" | "ignore";
@@ -130,6 +167,13 @@ export const api = {
   /** Resolves to a note when the block was shortened for a meeting. */
   startFocus: (minutes?: number, taskId?: number) => invoke<string | null>("start_focus", { minutes, taskId }),
   stopFocus: () => invoke<void>("stop_focus"),
+  startBreak: (long?: boolean, minutes?: number) => invoke<void>("start_break", { long, minutes }),
+  pauseFocus: () => invoke<void>("pause_focus"),
+  resumeFocus: () => invoke<void>("resume_focus"),
+  extendFocus: (minutes: number) => invoke<void>("extend_focus", { minutes }),
+  skipFocus: () => invoke<void>("skip_focus"),
+  focusStats: () => invoke<FocusStats>("focus_stats"),
+  setPomodoroConfig: (config: PomodoroConfig) => invoke<void>("pomodoro_config_set", { config }),
   listNotifications: (category?: Category) => invoke<InboxItem[]>("list_notifications", { category }),
   inboxUnseen: () => invoke<number>("inbox_unseen"),
   markInboxSeen: () => invoke<void>("mark_inbox_seen"),

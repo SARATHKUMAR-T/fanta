@@ -30,11 +30,20 @@ pub struct Task {
 #[derive(Debug, Clone, Serialize)]
 pub struct FocusSession {
     pub id: i64,
-    /// "focus" or "break"
+    /// "focus", "short_break", or "long_break"
     pub kind: String,
     pub task_id: Option<i64>,
     pub started_at: String,
     pub ends_at: String,
+    pub planned_minutes: i64,
+    /// Set while the timer is paused.
+    pub paused_at: Option<String>,
+}
+
+impl FocusSession {
+    pub fn is_focus(&self) -> bool {
+        self.kind == "focus"
+    }
 }
 
 pub fn data_dir() -> PathBuf {
@@ -123,6 +132,16 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             "ALTER TABLE notifications ADD COLUMN sender TEXT;
              ALTER TABLE notifications ADD COLUMN chat TEXT;
              ALTER TABLE notifications ADD COLUMN text TEXT;",
+        )?;
+    }
+    if !has_column(conn, "focus_sessions", "planned_minutes")? {
+        conn.execute_batch(
+            "ALTER TABLE focus_sessions ADD COLUMN planned_minutes INTEGER;
+             ALTER TABLE focus_sessions ADD COLUMN paused_at TEXT;
+             ALTER TABLE focus_sessions ADD COLUMN paused_secs INTEGER NOT NULL DEFAULT 0;
+             UPDATE focus_sessions SET kind = 'short_break' WHERE kind = 'break';
+             UPDATE focus_sessions SET planned_minutes =
+                 CAST(ROUND((julianday(ends_at) - julianday(started_at)) * 1440) AS INTEGER);",
         )?;
     }
     // Bump when parse_message improves, so stored messages are re-parsed once.
@@ -233,21 +252,26 @@ pub fn mark_reminded(conn: &Connection, id: i64) -> anyhow::Result<()> {
 
 // ---- focus sessions ----
 
+const SESSION_COLS: &str = "id, kind, task_id, started_at, ends_at, COALESCE(planned_minutes, 0), paused_at";
+
+fn session_row(r: &rusqlite::Row) -> rusqlite::Result<FocusSession> {
+    Ok(FocusSession {
+        id: r.get(0)?,
+        kind: r.get(1)?,
+        task_id: r.get(2)?,
+        started_at: r.get(3)?,
+        ends_at: r.get(4)?,
+        planned_minutes: r.get(5)?,
+        paused_at: r.get(6)?,
+    })
+}
+
 pub fn active_session(conn: &Connection) -> anyhow::Result<Option<FocusSession>> {
     Ok(conn
         .query_row(
-            "SELECT id, kind, task_id, started_at, ends_at FROM focus_sessions
-             WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1",
+            &format!("SELECT {SESSION_COLS} FROM focus_sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"),
             [],
-            |r| {
-                Ok(FocusSession {
-                    id: r.get(0)?,
-                    kind: r.get(1)?,
-                    task_id: r.get(2)?,
-                    started_at: r.get(3)?,
-                    ends_at: r.get(4)?,
-                })
-            },
+            session_row,
         )
         .optional()?)
 }
@@ -256,18 +280,72 @@ pub fn start_session(conn: &Connection, kind: &str, minutes: u32, task_id: Optio
     let now = chrono::Local::now();
     let ends = now + chrono::Duration::minutes(minutes as i64);
     conn.execute(
-        "INSERT INTO focus_sessions (kind, task_id, started_at, ends_at) VALUES (?1, ?2, ?3, ?4)",
-        params![kind, task_id, now.format(TS).to_string(), ends.format(TS).to_string()],
+        "INSERT INTO focus_sessions (kind, task_id, started_at, ends_at, planned_minutes) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![kind, task_id, now.format(TS).to_string(), ends.format(TS).to_string(), minutes],
     )?;
     active_session(conn)?.ok_or_else(|| anyhow::anyhow!("session vanished"))
 }
 
+/// Seconds between two stored timestamps.
+fn secs_between(from: &str, to: &str) -> i64 {
+    let p = |s: &str| chrono::NaiveDateTime::parse_from_str(s, TS).ok();
+    match (p(from), p(to)) {
+        (Some(a), Some(b)) => (b - a).num_seconds().max(0),
+        _ => 0,
+    }
+}
+
 pub fn end_session(conn: &Connection, id: i64, completed: bool) -> anyhow::Result<()> {
+    // A paused session's pause counts up to now, so its focused time stays right.
     conn.execute(
-        "UPDATE focus_sessions SET ended_at = ?2, completed = ?3 WHERE id = ?1",
+        "UPDATE focus_sessions SET
+            paused_secs = paused_secs + CASE WHEN paused_at IS NULL THEN 0
+                ELSE CAST(ROUND((julianday(?2) - julianday(paused_at)) * 86400) AS INTEGER) END,
+            paused_at = NULL, ended_at = ?2, completed = ?3
+         WHERE id = ?1",
         params![id, now_ts(), completed],
     )?;
     Ok(())
+}
+
+pub fn pause_session(conn: &Connection, id: i64) -> anyhow::Result<()> {
+    conn.execute("UPDATE focus_sessions SET paused_at = ?2 WHERE id = ?1 AND paused_at IS NULL", params![id, now_ts()])?;
+    Ok(())
+}
+
+/// Resumes, pushing the end time back by however long it was paused.
+pub fn resume_session(conn: &Connection, id: i64) -> anyhow::Result<()> {
+    let Some(s) = active_session(conn)?.filter(|s| s.id == id) else { return Ok(()) };
+    let Some(paused_at) = s.paused_at else { return Ok(()) };
+    let paused = secs_between(&paused_at, &now_ts());
+    let ends = chrono::NaiveDateTime::parse_from_str(&s.ends_at, TS)? + chrono::Duration::seconds(paused);
+    conn.execute(
+        "UPDATE focus_sessions SET paused_at = NULL, paused_secs = paused_secs + ?2, ends_at = ?3 WHERE id = ?1",
+        params![id, paused, ends.format(TS).to_string()],
+    )?;
+    Ok(())
+}
+
+pub fn extend_session(conn: &Connection, id: i64, minutes: i64) -> anyhow::Result<()> {
+    let Some(s) = active_session(conn)?.filter(|s| s.id == id) else { return Ok(()) };
+    let ends = chrono::NaiveDateTime::parse_from_str(&s.ends_at, TS)? + chrono::Duration::minutes(minutes);
+    conn.execute(
+        "UPDATE focus_sessions SET ends_at = ?2, planned_minutes = COALESCE(planned_minutes, 0) + ?3 WHERE id = ?1",
+        params![id, ends.format(TS).to_string(), minutes],
+    )?;
+    Ok(())
+}
+
+/// Completed focus blocks today since the last long break - where we are in the cycle.
+pub fn focus_since_long_break(conn: &Connection) -> anyhow::Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM focus_sessions
+         WHERE kind = 'focus' AND completed = 1 AND date(started_at) = date('now', 'localtime')
+           AND id > COALESCE((SELECT MAX(id) FROM focus_sessions
+                              WHERE kind = 'long_break' AND date(started_at) = date('now', 'localtime')), 0)",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 /// Number of completed focus blocks today.

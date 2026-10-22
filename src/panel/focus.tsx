@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, FocusStatus, parseTs } from "../api";
-import { PlayIcon, StopIcon } from "../ui/Icons";
+import { PauseIcon, PlayIcon } from "../ui/Icons";
 
 const NOTE_EVENT = "fanta:focus-note";
+/** Asks the panel to show the Focus tab. */
+export const OPEN_FOCUS_EVENT = "fanta:open-focus";
 
 /** Starts focus and surfaces "shortened for a meeting" notes or refusals as a toast. */
 export async function startFocus(minutes?: number, taskId?: number) {
@@ -49,10 +51,11 @@ export function useFocusStatus() {
     };
   }, []);
   const s = status?.active;
-  const remaining = s ? Math.max(0, parseTs(s.ends_at).getTime() - now) : 0;
-  const progress = s
-    ? Math.min(1, Math.max(0, (now - parseTs(s.started_at).getTime()) / (parseTs(s.ends_at).getTime() - parseTs(s.started_at).getTime())))
-    : 0;
+  // Paused: freeze at the moment it was paused.
+  const at = s?.paused_at ? parseTs(s.paused_at).getTime() : now;
+  const remaining = s ? Math.max(0, parseTs(s.ends_at).getTime() - at) : 0;
+  const total = s ? Math.max(1, s.planned_minutes) * 60_000 : 1;
+  const progress = s ? Math.min(1, Math.max(0, 1 - remaining / total)) : 0;
   return { status, remaining, progress };
 }
 
@@ -76,13 +79,17 @@ export function FocusPill() {
   const r = 9;
   const c = 2 * Math.PI * r;
   return (
-    <button className={`focus-pill running ${s.kind}`} onClick={() => api.stopFocus()} title={s.kind === "focus" ? "Stop focus" : "Skip break"}>
+    <button
+      className={`focus-pill running ${s.kind === "focus" ? "focus" : "break"} ${s.paused_at ? "paused" : ""}`}
+      onClick={() => window.dispatchEvent(new CustomEvent(OPEN_FOCUS_EVENT))}
+      title="Open the Focus tab"
+    >
       <svg width="22" height="22" viewBox="0 0 22 22" className="ring">
         <circle cx="11" cy="11" r={r} className="ring-bg" />
         <circle cx="11" cy="11" r={r} className="ring-fg" strokeDasharray={c} strokeDashoffset={c * progress} />
       </svg>
       <span className="pill-time">{mmss(remaining)}</span>
-      <StopIcon size={12} />
+      {s.paused_at && <PauseIcon size={12} />}
     </button>
   );
 }

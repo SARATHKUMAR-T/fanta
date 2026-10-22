@@ -174,8 +174,12 @@ export default function Companion() {
   }, []);
 
   const focusing = focus?.active?.kind === "focus";
-  const onBreak = focus?.active?.kind === "break";
-  const remaining = focus?.active ? parseTs(focus.active.ends_at).getTime() - now : 0;
+  const onBreak = !!focus?.active && !focusing;
+  const paused = !!focus?.active?.paused_at;
+  // A paused timer shows the time that was left when it was paused.
+  const remaining = focus?.active
+    ? parseTs(focus.active.ends_at).getTime() - (paused ? parseTs(focus.active.paused_at!).getTime() : now)
+    : 0;
 
   function dismissHint() {
     if (!hint) return;
@@ -281,7 +285,7 @@ export default function Companion() {
         {unseen > 0 && <span className="badge">{unseen > 9 ? "9+" : unseen}</span>}
         {(focusing || onBreak) && (
           <span className={`timer ${onBreak ? "break" : ""}`}>
-            {onBreak ? "☕" : "🎧"} {mmss(remaining)}
+            {paused ? "⏸" : onBreak ? "☕" : "🎧"} {mmss(remaining)}
           </span>
         )}
         {voice !== "idle" && <span className={`mic-badge ${voice}`}>🎙️</span>}

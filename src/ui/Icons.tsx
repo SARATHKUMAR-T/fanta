@@ -91,3 +91,21 @@ export const SpeakerIcon = (p: P) => (
     <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
   </Svg>
 );
+export const PauseIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="6.5" y="5" width="4" height="14" rx="1.5" fill="currentColor" />
+    <rect x="13.5" y="5" width="4" height="14" rx="1.5" fill="currentColor" />
+  </Svg>
+);
+export const SkipIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 5.5v13l9-6.5-9-6.5Z" fill="currentColor" />
+    <path d="M18 5v14" />
+  </Svg>
+);
+export const TomatoIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="13.5" r="7.5" />
+    <path d="M12 6V3.5M8.5 6.5 12 8l3.5-1.5" />
+  </Svg>
+);

@@ -8,16 +8,17 @@ import { useMood } from "../companion/useMood";
 import Connections from "../Connections";
 import Inbox from "../Inbox";
 import Tasks from "../Tasks";
-import { CalendarIcon, ChatIcon, CloseIcon, GearIcon, InboxIcon, TasksIcon } from "../ui/Icons";
+import { CalendarIcon, ChatIcon, CloseIcon, GearIcon, InboxIcon, TasksIcon, TomatoIcon } from "../ui/Icons";
 import Chat from "./Chat";
-import { FocusPill, mmss, useFocusNote, useFocusStatus } from "./focus";
+import { FocusPill, mmss, OPEN_FOCUS_EVENT, useFocusNote, useFocusStatus } from "./focus";
+import FocusView from "./FocusView";
 import Brain from "./Brain";
 import Plugins from "./Plugins";
 import SoundSettings from "./SoundSettings";
 import VoiceSettings from "./VoiceSettings";
 import "./panel.css";
 
-type View = "chat" | "tasks" | "inbox" | "calendar" | "settings";
+type View = "chat" | "focus" | "tasks" | "inbox" | "calendar" | "settings";
 
 function useStatusLine(name: string, openTasks: number) {
   const { status, remaining } = useFocusStatus();
@@ -38,8 +39,9 @@ function useStatusLine(name: string, openTasks: number) {
     };
   }, []);
   const s = status?.active;
+  if (s?.paused_at) return `Paused · ${mmss(remaining)} left`;
   if (s?.kind === "focus") return `Focusing · ${mmss(remaining)} left`;
-  if (s?.kind === "break") return `On a break · ${mmss(remaining)}`;
+  if (s) return `${s.kind === "long_break" ? "Long break" : "On a break"} · ${mmss(remaining)}`;
   if (next) return `Next: ${next.subject} at ${next.start_at.slice(11, 16)}`;
   if (openTasks > 0) return `${openTasks} task${openTasks > 1 ? "s" : ""} open`;
   return `${name} is here for you`;
@@ -71,14 +73,18 @@ export default function Panel() {
     ];
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && api.hidePanel();
     window.addEventListener("keydown", onKey);
+    const openFocus = () => setView("focus");
+    window.addEventListener(OPEN_FOCUS_EVENT, openFocus);
     return () => {
       subs.forEach((p) => p.then((f) => f()));
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_FOCUS_EVENT, openFocus);
     };
   }, []);
 
   const tabs: { id: View; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: "chat", label: "Chat", icon: <ChatIcon size={16} /> },
+    { id: "focus", label: "Focus", icon: <TomatoIcon size={16} /> },
     { id: "tasks", label: "Tasks", icon: <TasksIcon size={16} />, badge: openTasks },
     { id: "inbox", label: "Inbox", icon: <InboxIcon size={16} />, badge: unseen },
     { id: "calendar", label: "Calendar", icon: <CalendarIcon size={16} /> },
@@ -111,9 +117,9 @@ export default function Panel() {
       {view !== "settings" && (
         <nav className="seg">
           {tabs.map((t) => (
-            <button key={t.id} className={view === t.id ? "active" : ""} onClick={() => setView(t.id)}>
+            <button key={t.id} className={view === t.id ? "active" : ""} onClick={() => setView(t.id)} title={t.label}>
               {t.icon}
-              <span>{t.label}</span>
+              {view === t.id && <span>{t.label}</span>}
               {!!t.badge && <em>{t.badge > 9 ? "9+" : t.badge}</em>}
             </button>
           ))}
@@ -125,6 +131,9 @@ export default function Panel() {
       <main className="panel-body">
         <div className={view === "chat" ? "view" : "view hidden"}>
           <Chat name={name} />
+        </div>
+        <div className={view === "focus" ? "view scroll" : "view hidden"}>
+          <FocusView visible={shown && view === "focus"} />
         </div>
         <div className={view === "tasks" ? "view scroll" : "view hidden"}>
           <Tasks onCount={onCount} />
