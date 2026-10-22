@@ -106,7 +106,43 @@ pub fn open() -> anyhow::Result<Connection> {
             value TEXT NOT NULL
         );",
     )?;
+    migrate(&conn)?;
     Ok(conn)
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(names.iter().any(|n| n == column))
+}
+
+/// Adds columns introduced after a table was first created.
+fn migrate(conn: &Connection) -> anyhow::Result<()> {
+    if !has_column(conn, "notifications", "sender")? {
+        conn.execute_batch(
+            "ALTER TABLE notifications ADD COLUMN sender TEXT;
+             ALTER TABLE notifications ADD COLUMN chat TEXT;
+             ALTER TABLE notifications ADD COLUMN text TEXT;",
+        )?;
+    }
+    // Bump when parse_message improves, so stored messages are re-parsed once.
+    const PARSE_VERSION: &str = "3";
+    if get_setting(conn, "notif_parse_version")?.as_deref() != Some(PARSE_VERSION) {
+        // Re-parse what was captured before, so old messages show their real text too.
+        let rows: Vec<(i64, String, String, String)> = conn
+            .prepare("SELECT id, source, title, body FROM notifications")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, source, title, body) in rows {
+            let m = crate::notifications::parse_message(&source, &title, &body);
+            conn.execute(
+                "UPDATE notifications SET sender = ?2, chat = ?3, text = ?4 WHERE id = ?1",
+                params![id, m.sender, m.chat, m.text],
+            )?;
+        }
+        set_setting(conn, "notif_parse_version", PARSE_VERSION)?;
+    }
+    Ok(())
 }
 
 // ---- messages ----
@@ -264,6 +300,11 @@ pub struct Notification {
     pub source: String,
     pub title: String,
     pub body: String,
+    /// Who sent it, which chat/thread it's in, and the message text itself
+    /// (parsed from title/body; falls back to the title and body).
+    pub sender: Option<String>,
+    pub chat: Option<String>,
+    pub text: Option<String>,
     /// "pending" until triaged, then "urgent", "fyi", or "ignore".
     pub category: String,
     pub summary: Option<String>,
@@ -273,7 +314,8 @@ pub struct Notification {
     pub received_at: String,
 }
 
-const NOTIF_COLS: &str = "id, app, source, title, body, category, summary, reason, during_focus, seen, received_at";
+const NOTIF_COLS: &str =
+    "id, app, source, title, body, category, summary, reason, during_focus, seen, received_at, sender, chat, text";
 
 fn notif_row(r: &rusqlite::Row) -> rusqlite::Result<Notification> {
     Ok(Notification {
@@ -288,7 +330,16 @@ fn notif_row(r: &rusqlite::Row) -> rusqlite::Result<Notification> {
         during_focus: r.get::<_, i64>(8)? != 0,
         seen: r.get::<_, i64>(9)? != 0,
         received_at: r.get(10)?,
+        sender: r.get(11)?,
+        chat: r.get(12)?,
+        text: r.get(13)?,
     })
+}
+
+pub struct ParsedMessage {
+    pub sender: Option<String>,
+    pub chat: Option<String>,
+    pub text: String,
 }
 
 pub fn insert_notification(
@@ -297,11 +348,13 @@ pub fn insert_notification(
     source: &str,
     title: &str,
     body: &str,
+    parsed: &ParsedMessage,
     during_focus: bool,
 ) -> anyhow::Result<i64> {
     conn.execute(
-        "INSERT INTO notifications (app, source, title, body, during_focus, received_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![app, source, title, body, during_focus, now_ts()],
+        "INSERT INTO notifications (app, source, title, body, sender, chat, text, during_focus, received_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![app, source, title, body, parsed.sender, parsed.chat, parsed.text, during_focus, now_ts()],
     )?;
     Ok(conn.last_insert_rowid())
 }

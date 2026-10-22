@@ -68,12 +68,12 @@ export default function Inbox({ visible }: { visible: boolean }) {
                 <option value="ignore">ignore</option>
               </select>
             </div>
-            <div className="notif-title">{n.summary ?? n.title}</div>
-            {n.summary && (
-              <div className="notif-raw muted">
-                {n.title}: {n.body}
-              </div>
-            )}
+            <div className="notif-from">
+              <b>{n.sender ?? n.title}</b>
+              {n.chat && <span className="muted"> in {n.chat}</span>}
+            </div>
+            <div className="notif-title">{n.text ?? n.body}</div>
+            {n.summary && n.category !== "pending" && <div className="notif-raw muted">Fanta: {n.summary}</div>}
           </li>
         ))}
       </ul>

@@ -115,8 +115,10 @@ fn capture(app: &AppHandle, app_name: &str, desktop_entry: &str, title: &str, bo
     let id = {
         let conn = state.db.lock().unwrap();
         let during_focus = db::active_session(&conn)?.is_some_and(|s| s.kind == "focus");
-        let id = db::insert_notification(&conn, app_name, &source, &title, &body, during_focus)?;
-        if let Some((category, reason)) = rule_triage(cfg, app_name, &source, &title, &body) {
+        let parsed = parse_message(&source, &title, &body);
+        let id = db::insert_notification(&conn, app_name, &source, &title, &body, &parsed, during_focus)?;
+        let who = parsed.sender.clone().unwrap_or_else(|| title.clone());
+        if let Some((category, reason)) = rule_triage(cfg, app_name, &source, &who, &parsed.text) {
             db::set_triage(&conn, id, category, None, Some(&reason))?;
             drop(conn);
             let _ = app.emit("inbox://changed", ());
@@ -152,6 +154,61 @@ fn strip_markup(s: &str) -> String {
         .replace("&apos;", "'")
         .trim()
         .to_string()
+}
+
+/// A line like "teams.cloud.microsoft" that Chrome puts above web-app notification text.
+fn is_origin_line(line: &str) -> bool {
+    let l = line.trim();
+    !l.is_empty()
+        && l.len() < 64
+        && !l.contains(' ')
+        && l.contains('.')
+        && l.chars().all(|c| c.is_ascii_alphanumeric() || ".-:/".contains(c))
+}
+
+/// Splits a chat notification into sender, chat and the exact message text.
+/// Teams in Chrome sends title "Aarthi S, +3" (the chat) and body
+/// "teams.cloud.microsoft\n\nAkilesh: customer grievance agent?".
+pub fn parse_message(source: &str, title: &str, body: &str) -> db::ParsedMessage {
+    let mut lines: Vec<&str> = body.lines().collect();
+    while lines.first().is_some_and(|l| l.trim().is_empty() || is_origin_line(l)) {
+        lines.remove(0);
+    }
+    let text = lines.join("\n").trim().to_string();
+    let title = title.trim();
+    let is_chat_app = matches!(source, "Teams" | "Slack" | "WhatsApp" | "Discord");
+    if is_chat_app {
+        if let Some((who, rest)) = text.split_once(": ") {
+            let who = who.trim();
+            if !who.is_empty() && who.chars().count() <= 40 && !who.contains('\n') && !who.contains("http") {
+                return db::ParsedMessage {
+                    sender: Some(who.to_string()),
+                    chat: (title != who && !title.is_empty()).then(|| title.to_string()),
+                    text: rest.trim().to_string(),
+                };
+            }
+        }
+    }
+    // "Akilesh Murali @mentioned you" -> sender "Akilesh Murali", the action kept with the text.
+    let mut sender = title.to_string();
+    let mut action = None;
+    for suffix in [" @mentioned you", " mentioned you", " reacted to your message", " replied to your message", " replied to a message", " liked your message"] {
+        if let Some(name) = title.strip_suffix(suffix) {
+            sender = name.trim().to_string();
+            action = Some(suffix.trim().trim_start_matches('@'));
+            break;
+        }
+    }
+    let text = if text.is_empty() { title.to_string() } else { text };
+    db::ParsedMessage {
+        sender: (!sender.is_empty()).then_some(sender),
+        chat: None,
+        // Keep what kind of message it was - a mention means they want the user's attention.
+        text: match action {
+            Some(a) => format!("({a}) {text}"),
+            None => text,
+        },
+    }
 }
 
 /// Names the real source when a browser sends notifications for a web app.
@@ -209,10 +266,12 @@ fn rule_triage(cfg: &NotificationConfig, app_name: &str, source: &str, title: &s
 const TRIAGE_PROMPT: &str = "You triage desktop notifications for a busy professional.
 Categories:
 - urgent: needs attention within minutes - a direct question or request with time pressure, \
-an incident or outage, a meeting starting now, their manager asking something.
-- fyi: worth reading later - normal chat messages, mentions, updates, emails.
-- ignore: noise - promotions, reactions/likes, 'X is typing', app or system chatter, \
-download complete, music.
+an incident or outage, a meeting starting now, their manager asking for something now.
+- fyi: worth reading - any real chat message a person wrote (questions, replies, updates, \
+files shared, mentions), emails, calendar changes.
+- ignore: noise only - reactions/likes, 'X is typing', a lone emoji or GIF, promotions, \
+app or system chatter, download complete, music.
+A message a person typed is never ignore unless it is only an emoji, sticker, GIF or reaction.
 Reply with JSON: category, summary (plain, max 12 words, who + what), reason (max 8 words).";
 
 async fn triage(app: &AppHandle, id: i64) -> anyhow::Result<()> {
@@ -234,7 +293,16 @@ async fn triage(app: &AppHandle, id: i64) -> anyhow::Result<()> {
     });
     let messages = [
         Message::new("system", TRIAGE_PROMPT),
-        Message::new("user", format!("App: {}\nTitle: {}\nBody: {}", n.source, n.title, n.body)),
+        Message::new(
+            "user",
+            format!(
+                "App: {}\nChat: {}\nFrom: {}\nMessage: {}",
+                n.source,
+                n.chat.as_deref().unwrap_or("-"),
+                n.sender.as_deref().unwrap_or(&n.title),
+                n.text.as_deref().unwrap_or(&n.body)
+            ),
+        ),
     ];
     let out: Value = state.ollama.complete_json(&state.persona.model, &messages, &schema).await?;
     let category = match out["category"].as_str() {
@@ -253,8 +321,9 @@ fn after_triage(app: &AppHandle, id: i64) -> anyhow::Result<()> {
     let Some(n) = db::get_notification(&conn, id)? else { return Ok(()) };
     let still_focusing = db::active_session(&conn)?.is_some_and(|s| s.kind == "focus");
     if n.category == "urgent" && n.during_focus && still_focusing {
-        let text = n.summary.clone().unwrap_or_else(|| format!("{}: {}", n.title, n.body));
-        desktop::notify(&format!("Urgent · {}", n.source), &text, true);
+        let who = n.sender.clone().unwrap_or_else(|| n.title.clone());
+        let text = n.text.clone().unwrap_or_else(|| n.body.clone());
+        desktop::notify(&format!("Urgent · {who} ({})", n.source), &text, true);
     }
     Ok(())
 }
@@ -287,7 +356,7 @@ async fn digest(app: &AppHandle, since: &str) -> anyhow::Result<()> {
     let list = items
         .iter()
         .rev()
-        .map(|n| format!("- [{}] {} · {}", n.category, n.source, n.summary.clone().unwrap_or_else(|| n.title.clone())))
+        .map(|n| format!("- [{}] {}", n.category, describe(n)))
         .collect::<Vec<_>>()
         .join("\n");
     let message = scheduler::speak(
@@ -301,9 +370,35 @@ async fn digest(app: &AppHandle, since: &str) -> anyhow::Result<()> {
     scheduler::post(app, &message, false)
 }
 
+/// One line with who said what, for prompts: "15:42 Teams · Akilesh in “Team chat”: hi".
+pub fn describe(n: &db::Notification) -> String {
+    let who = n.sender.clone().unwrap_or_else(|| n.title.clone());
+    let chat = n.chat.as_ref().map(|c| format!(" in “{c}”")).unwrap_or_default();
+    let text: String = n.text.clone().unwrap_or_else(|| n.body.clone()).chars().take(300).collect();
+    format!("{} {} · {who}{chat}: {text}", n.received_at.get(11..16).unwrap_or(""), n.source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_teams_group_message() {
+        let m = parse_message("Teams", "Aarthi Selvakumari, +3", "teams.cloud.microsoft\n\nAkilesh: customer grievance agent?");
+        assert_eq!(m.sender.as_deref(), Some("Akilesh"));
+        assert_eq!(m.chat.as_deref(), Some("Aarthi Selvakumari, +3"));
+        assert_eq!(m.text, "customer grievance agent?");
+
+        let dm = parse_message("Teams", "Ravi Kumar", "teams.microsoft.com\n\nare you free at 3?");
+        assert_eq!((dm.sender.as_deref(), dm.chat, dm.text.as_str()), (Some("Ravi Kumar"), None, "are you free at 3?"));
+
+        let mention = parse_message("Teams", "Akilesh Murali @mentioned you", "teams.cloud.microsoft\n\nSarathkumar come on lets finish");
+        assert_eq!(mention.sender.as_deref(), Some("Akilesh Murali"));
+        assert_eq!(mention.text, "(mentioned you) Sarathkumar come on lets finish");
+
+        let mail = parse_message("Thunderbird", "Invoice #881", "Your invoice: due 12:30");
+        assert_eq!((mail.sender.as_deref(), mail.text.as_str()), (Some("Invoice #881"), "Your invoice: due 12:30"));
+    }
 
     #[test]
     fn strips_chrome_markup() {

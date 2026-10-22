@@ -9,6 +9,9 @@ const CONTEXT_TOKENS: u32 = 8192;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// Provider's id for the call; cloud APIs match tool results by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub function: ToolCallFunction,
 }
 
@@ -28,11 +31,18 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// For role "tool": which call this answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// The provider's own assistant content (e.g. Claude's thinking blocks),
+    /// replayed unchanged within a tool loop. Never sent to Ollama.
+    #[serde(skip)]
+    pub raw: Option<Value>,
 }
 
 impl Message {
     pub fn new(role: &str, content: impl Into<String>) -> Self {
-        Self { role: role.into(), content: content.into(), tool_calls: vec![], tool_name: None }
+        Self { role: role.into(), content: content.into(), tool_calls: vec![], tool_name: None, tool_call_id: None, raw: None }
     }
 }
 

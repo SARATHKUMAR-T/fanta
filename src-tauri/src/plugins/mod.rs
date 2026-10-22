@@ -290,6 +290,7 @@ impl Host {
         let mut out = vec![];
         for p in running {
             let wanted = total <= ALWAYS_LOAD_LIMIT
+                || context == "*"
                 || p.triggers().iter().any(|t| t == "*" || words.iter().any(|w| w == t));
             if !wanted {
                 continue;
@@ -313,6 +314,26 @@ impl Host {
             }
         }
         out
+    }
+
+    /// Every running plugin's tools (for cloud models, which cope with many).
+    pub fn all_schemas(&self) -> Vec<Value> {
+        self.schemas_for("*")
+    }
+
+    /// One line per plugin for the system prompt.
+    pub fn summary(&self) -> String {
+        self.plugins
+            .lock()
+            .unwrap()
+            .values()
+            .map(|p| {
+                let (status, _) = p.status.lock().unwrap().clone();
+                let tools = p.tools.lock().unwrap().len();
+                format!("- {} ({status}, {tools} tools; loads for the local model when the user says: {})", p.name, p.triggers().join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// `None` if no approval is needed; otherwise what the approval card should say.

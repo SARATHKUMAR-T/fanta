@@ -4,12 +4,14 @@ import { api, CalEvent, Persona, toTs } from "../api";
 import CalendarView from "../CalendarView";
 import Character from "../companion/Character";
 import "../companion/character.css";
+import { useMood } from "../companion/useMood";
 import Connections from "../Connections";
 import Inbox from "../Inbox";
 import Tasks from "../Tasks";
 import { CalendarIcon, ChatIcon, CloseIcon, GearIcon, InboxIcon, TasksIcon } from "../ui/Icons";
 import Chat from "./Chat";
 import { FocusPill, mmss, useFocusNote, useFocusStatus } from "./focus";
+import Brain from "./Brain";
 import Plugins from "./Plugins";
 import "./panel.css";
 
@@ -48,6 +50,7 @@ export default function Panel() {
   const [openTasks, setOpenTasks] = useState(0);
   const [unseen, setUnseen] = useState(0);
   const note = useFocusNote();
+  const mood = useMood();
   const name = persona?.name ?? "Fanta";
   const statusLine = useStatusLine(name, openTasks);
   const onCount = useCallback((n: number) => setOpenTasks(n), []);
@@ -76,7 +79,7 @@ export default function Panel() {
     <div className="panel">
       <header className="panel-head" data-tauri-drag-region>
         <div className="head-avatar" data-tauri-drag-region>
-          <Character mood="idle" size={44} face />
+          <Character mood={mood} size={44} face />
         </div>
         <div className="head-text" data-tauri-drag-region>
           <div className="head-name" data-tauri-drag-region>
@@ -131,6 +134,7 @@ export default function Panel() {
               </button>
               <h2>Settings</h2>
             </div>
+            <Brain />
             <Connections />
             <Plugins />
             <section className="card">

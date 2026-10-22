@@ -1,28 +1,31 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, ApprovalRequest, FocusStatus, parseTs } from "../api";
-import Character, { Mood } from "./Character";
+import { api, ApprovalRequest, FocusStatus, InboxItem, parseTs, Persona } from "../api";
+import Character from "./Character";
+import { UI_EVENTS, useMood } from "./useMood";
 import "./character.css";
 import "./companion.css";
 
-type Bubble = { text: string; kind: "info" | "alert" };
+type Bubble = { kind: "info" | "alert" | "message"; title?: string; meta?: string; text: string; more?: number };
 
 const BUBBLE_MS = 12_000;
+const MESSAGE_BUBBLE_MS = 16_000;
 const DRAG_THRESHOLD = 5;
+const CHAT_APPS = ["Teams", "Slack", "WhatsApp", "Discord"];
 
 function mmss(ms: number) {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function clip(text: string, max = 160) {
+function clip(text: string, max = 220) {
   const t = text.replace(/https:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
   return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }
 
 export default function Companion() {
-  const [transient, setTransient] = useState<Mood | null>(null);
+  const mood = useMood();
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [focus, setFocus] = useState<FocusStatus | null>(null);
   const [unseen, setUnseen] = useState(0);
@@ -35,17 +38,13 @@ export default function Companion() {
       return false;
     }
   });
-  const moodTimer = useRef<number | undefined>(undefined);
   const bubbleTimer = useRef<number | undefined>(undefined);
   const pendingApprovals = useRef(new Set<number>());
-  const lastUrgent = useRef<number | null>(null);
+  const lastAnnounced = useRef<number | null>(null);
+  const persona = useRef<Persona | null>(null);
+  const focusRef = useRef<FocusStatus | null>(null);
+  const panelOpenRef = useRef(false);
   const press = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
-
-  function flash(mood: Mood, ms: number) {
-    setTransient(mood);
-    clearTimeout(moodTimer.current);
-    moodTimer.current = window.setTimeout(() => setTransient(null), ms);
-  }
 
   async function say(b: Bubble | null, ms = BUBBLE_MS) {
     clearTimeout(bubbleTimer.current);
@@ -60,53 +59,76 @@ export default function Companion() {
     }
   }
 
+  /** Reads out new messages once they're sorted: exact text, who sent it, which chat. */
+  async function announceMessages() {
+    const items = (await api.listNotifications()).slice(0, 15).reverse(); // oldest first
+    if (lastAnnounced.current === null) {
+      lastAnnounced.current = items.length ? items[items.length - 1].id : 0; // don't replay old ones at startup
+      return;
+    }
+    const fresh: InboxItem[] = [];
+    for (const n of items) {
+      if (n.id <= lastAnnounced.current) continue;
+      if (n.category === "pending") break; // wait until it's sorted, keep order
+      lastAnnounced.current = n.id;
+      fresh.push(n);
+    }
+    const mode = persona.current?.notifications.bubbles ?? "messages";
+    const focusing = focusRef.current?.active?.kind === "focus";
+    const worth = fresh.filter(
+      (n) => n.category === "urgent" || (mode === "messages" && !focusing && n.category === "fyi" && CHAT_APPS.includes(n.source)),
+    );
+    if (mode === "off" || worth.length === 0 || panelOpenRef.current) return;
+    const n = worth[worth.length - 1];
+    const urgent = n.category === "urgent";
+    emit(UI_EVENTS.newMessage, urgent ? "urgent" : "message");
+    say(
+      {
+        kind: urgent ? "alert" : "message",
+        title: `${urgent ? "🔴 " : "💬 "}${n.sender ?? n.title}`,
+        meta: [n.chat, n.source].filter(Boolean).join(" · "),
+        text: clip(n.text ?? n.body),
+        more: worth.length - 1,
+      },
+      MESSAGE_BUBBLE_MS,
+    );
+  }
+
   useEffect(() => {
-    const refreshFocus = () => api.focusStatus().then(setFocus);
+    api.persona().then((p) => (persona.current = p));
+    const refreshFocus = () =>
+      api.focusStatus().then((f) => {
+        focusRef.current = f;
+        setFocus(f);
+      });
     const refreshInbox = async () => {
       setUnseen(await api.inboxUnseen());
-      const urgent = await api.listNotifications("urgent");
-      const newest = urgent[0];
-      if (lastUrgent.current === null) {
-        lastUrgent.current = newest?.id ?? 0; // don't announce old ones on startup
-      } else if (newest && newest.id > lastUrgent.current) {
-        lastUrgent.current = newest.id;
-        if (!newest.seen) {
-          flash("alert", 5000);
-          say({ text: `Urgent · ${newest.source}: ${newest.summary ?? newest.title}`, kind: "alert" });
-        }
-      }
+      await announceMessages();
     };
     refreshFocus();
     refreshInbox();
+    if (import.meta.env.DEV && location.search.includes("demoBubble")) {
+      say({ kind: "message", title: "💬 Akilesh", meta: "Aarthi Selvakumari, +3 · Teams", text: "customer grievance agent? or should we keep it generic", more: 2 }, 0);
+    }
 
     const subs = [
       listen("focus://changed", refreshFocus),
       listen("inbox://changed", refreshInbox),
-      listen<string>("chat://token", () => flash("talking", 1400)),
-      listen<string>("chat://tool", () => flash("thinking", 20_000)),
-      listen("ui://thinking", () => flash("thinking", 20_000)),
-      listen<string>("chat://proactive", (e) => {
-        flash("happy", 3000);
-        say({ text: clip(e.payload), kind: e.payload.startsWith("⏰") || e.payload.startsWith("📅") ? "alert" : "info" });
-      }),
+      listen<string>("chat://proactive", (e) =>
+        say({ kind: e.payload.startsWith("⏰") || e.payload.startsWith("📅") ? "alert" : "info", text: clip(e.payload) }),
+      ),
       listen<ApprovalRequest>("approval://request", (e) => {
         pendingApprovals.current.add(e.payload.id);
-        flash("alert", 60_000);
-        say({ text: `Can I go ahead? ${clip(e.payload.text, 120)}`, kind: "alert" }, 0);
+        say({ kind: "alert", title: "Can I go ahead?", text: clip(e.payload.text, 140) }, 0);
       }),
       listen<{ id: number }>("approval://resolved", (e) => {
         pendingApprovals.current.delete(e.payload.id);
-        if (pendingApprovals.current.size === 0) {
-          flash("happy", 1500);
-          say(null);
-        }
+        if (pendingApprovals.current.size === 0) say(null);
       }),
       listen<boolean>("panel://visible", (e) => {
+        panelOpenRef.current = e.payload;
         setPanelOpen(e.payload);
-        if (e.payload) {
-          say(null);
-          flash("happy", 1500);
-        }
+        if (e.payload) say(null);
       }),
     ];
     const tick = setInterval(() => setNow(Date.now()), 1000);
@@ -114,13 +136,11 @@ export default function Companion() {
       subs.forEach((p) => p.then((f) => f()));
       clearInterval(tick);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const focusing = focus?.active?.kind === "focus";
   const onBreak = focus?.active?.kind === "break";
-  const hour = new Date(now).getHours();
-  const base: Mood = focusing ? "focus" : hour >= 23 || hour < 6 ? "sleepy" : "idle";
-  const mood = transient ?? base;
   const remaining = focus?.active ? parseTs(focus.active.ends_at).getTime() - now : 0;
 
   function dismissHint() {
@@ -169,7 +189,10 @@ export default function Companion() {
           >
             ×
           </button>
-          {bubble.text}
+          {bubble.title && <div className="speech-title">{bubble.title}</div>}
+          {bubble.meta && <div className="speech-meta">{bubble.meta}</div>}
+          <div className="speech-text">{bubble.text}</div>
+          {!!bubble.more && <div className="speech-more">+{bubble.more} more · open chat</div>}
         </div>
       )}
 

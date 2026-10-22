@@ -1,6 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Persona = { name: string; tagline: string; model: string };
+export type Persona = {
+  name: string;
+  tagline: string;
+  model: string;
+  notifications: { bubbles: "messages" | "urgent" | "off" };
+};
+
+export type Provider = "local" | "anthropic" | "openai" | "gemini";
+
+export type BrainStatus = {
+  provider: Provider;
+  model: string;
+  background: boolean;
+  keys: Record<string, boolean>;
+  models: Record<string, string>;
+  local_model: string;
+};
 
 export type Task = {
   id: number;
@@ -35,6 +51,9 @@ export type InboxItem = {
   source: string;
   title: string;
   body: string;
+  sender: string | null;
+  chat: string | null;
+  text: string | null;
   category: Category | "pending";
   summary: string | null;
   reason: string | null;
@@ -123,6 +142,11 @@ export const api = {
   pluginSetAutoApprove: (name: string, tool: string, auto: boolean) =>
     invoke<void>("plugin_set_auto_approve", { name, tool, auto }),
   openConfigDir: () => invoke<void>("open_config_dir"),
+  brainStatus: () => invoke<BrainStatus>("brain_status"),
+  brainSaveKey: (provider: Provider, key: string) => invoke<void>("brain_save_key", { provider, key }),
+  brainConfigure: (provider: Provider, model: string | null, background: boolean) =>
+    invoke<void>("brain_configure", { provider, model, background }),
+  brainModels: (provider: Provider, key?: string) => invoke<string[]>("brain_models", { provider, key }),
 };
 
 /** Local "YYYY-MM-DD HH:MM:SS" for a Date, matching the backend. */

@@ -1,5 +1,7 @@
 mod approvals;
+mod brain;
 mod calendar;
+mod cloud;
 mod db;
 mod desktop;
 mod focus;
@@ -27,6 +29,8 @@ pub struct AppState {
     pub persona: Persona,
     pub db: Mutex<rusqlite::Connection>,
     pub ollama: Ollama,
+    /// Shared client for cloud model APIs.
+    pub http: reqwest::Client,
     pub tools: tools::Registry,
     pub calendar: calendar::Calendar,
     pub approvals: approvals::Approvals,
@@ -43,16 +47,55 @@ fn get_history(state: State<'_, AppState>) -> Result<Vec<db::StoredMessage>, Str
     db::recent_messages(&state.db.lock().unwrap(), 100).map_err(|e| e.to_string())
 }
 
+/// What Fanta knows about right now beyond the chat: recent desktop messages
+/// (exact text) and installed plugins. Goes at the end of the system prompt.
+fn live_context(state: &AppState, conn: &rusqlite::Connection) -> String {
+    let since = (chrono::Local::now() - chrono::Duration::hours(3)).format(db::TS).to_string();
+    let items: Vec<db::Notification> = db::list_notifications(conn, None, Some(&since), 40)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| n.category != "ignore")
+        .take(15)
+        .collect();
+    let mut recent: Vec<String> = items.iter().map(|n| format!("- {}", notifications::describe(n))).collect();
+    recent.reverse();
+    // Spelled out because small models don't reliably infer it from the list.
+    let needs_reply: Vec<String> = items
+        .iter()
+        .filter(|n| {
+            let t = n.text.as_deref().unwrap_or(&n.body).trim();
+            t.starts_with("(mentioned you)") || t.ends_with('?') || n.category == "urgent"
+        })
+        .map(|n| format!("- {}", notifications::describe(n)))
+        .collect();
+    let mut out = String::new();
+    if !recent.is_empty() {
+        out += &format!(
+            "Recent messages on the user's desktop (last 3 hours, exact text, oldest first):\n{}\n",
+            recent.join("\n")
+        );
+    }
+    if !needs_reply.is_empty() {
+        out += &format!("Likely need a reply from the user (mentions, questions, urgent):\n{}\n", needs_reply.join("\n"));
+    }
+    let plugins = state.plugins.summary();
+    if !plugins.is_empty() {
+        out += &format!("Installed plugins:\n{plugins}\n");
+    }
+    out
+}
+
 /// Runs the agent loop for one user message, streaming tokens as `chat://token`.
 #[tauri::command]
 async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<String, String> {
     let mut messages = vec![];
     let mut routing_context = String::new();
-    // Takes the db lock itself, so it must run before we hold it below.
+    // These take the db lock themselves, so they must run before we hold it below.
     let meetings = calendar::today_summary(&app);
+    let cloud = brain::is_cloud(&app);
     {
         let conn = state.db.lock().unwrap();
-        // Open tasks go last in the system prompt so the stable prefix stays cacheable.
+        // Volatile context goes last in the system prompt so the stable prefix stays cacheable.
         let open: Vec<String> = db::list_tasks(&conn, false)
             .map_err(|e| e.to_string())?
             .iter()
@@ -62,7 +105,11 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         let tasks = if open.is_empty() { "(none)".to_string() } else { open.join("\n") };
         messages.push(Message::new(
             "system",
-            format!("{}\nOpen tasks:\n{tasks}\n{meetings}", state.persona.full_system_prompt()),
+            format!(
+                "{}\nOpen tasks:\n{tasks}\n{meetings}\n{}",
+                state.persona.full_system_prompt(),
+                live_context(&state, &conn)
+            ),
         ));
         let history = db::recent_messages(&conn, HISTORY_LIMIT).map_err(|e| e.to_string())?;
         if let Some(prev) = history.iter().rev().find(|m| m.role == "user") {
@@ -76,15 +123,15 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
     routing_context.push(' ');
     routing_context.push_str(&text);
     let mut schemas = state.tools.schemas();
-    schemas.extend(state.plugins.schemas_for(&routing_context));
-    for _ in 0..MAX_TOOL_ROUNDS {
-        let reply = state
-            .ollama
-            .chat(&state.persona.model, &messages, &schemas, |tok| {
-                let _ = app.emit("chat://token", tok);
-            })
-            .await
-            .map_err(|e| e.to_string())?;
+    // Cloud models handle many tools well; the small local model gets only the plugins mentioned.
+    schemas.extend(if cloud { state.plugins.all_schemas() } else { state.plugins.schemas_for(&routing_context) });
+    let rounds = if cloud { MAX_TOOL_ROUNDS * 2 } else { MAX_TOOL_ROUNDS };
+    for _ in 0..rounds {
+        let reply = brain::chat(&app, &messages, &schemas, |tok| {
+            let _ = app.emit("chat://token", tok);
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
         if reply.tool_calls.is_empty() {
             let content = reply.content.trim().to_string();
@@ -96,9 +143,14 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         messages.push(reply);
         for call in calls {
             let (name, args) = (&call.function.name, &call.function.arguments);
-            let result = dispatch(&app, &state, name, args).await;
+            let result = if cloud::invalid_args(args) {
+                "error: the tool arguments weren't valid JSON - try the call again".to_string()
+            } else {
+                dispatch(&app, &state, name, args).await
+            };
             let mut msg = Message::new("tool", result);
             msg.tool_name = Some(call.function.name);
+            msg.tool_call_id = call.id;
             messages.push(msg);
         }
     }
@@ -289,6 +341,27 @@ async fn plugin_set_auto_approve(app: AppHandle, name: String, tool: String, aut
 }
 
 #[tauri::command]
+fn brain_status(app: AppHandle) -> brain::Status {
+    brain::status(&app)
+}
+
+#[tauri::command]
+fn brain_save_key(provider: String, key: String) -> Result<(), String> {
+    brain::save_key(&provider, &key).map_err(err)
+}
+
+#[tauri::command]
+fn brain_configure(app: AppHandle, provider: String, model: Option<String>, background: bool) -> Result<(), String> {
+    brain::configure(&app, &provider, model.as_deref(), background).map_err(err)
+}
+
+/// Lists models the key can use; `key` lets the UI check a key before saving it.
+#[tauri::command]
+async fn brain_models(app: AppHandle, provider: String, key: Option<String>) -> Result<Vec<String>, String> {
+    brain::list_models(&app, &provider, key.as_deref()).await.map_err(err)
+}
+
+#[tauri::command]
 fn toggle_panel(app: AppHandle) -> Result<(), String> {
     windows::toggle_panel(&app).map_err(|e| e.to_string())
 }
@@ -313,6 +386,7 @@ pub fn run() {
     let persona = persona::load().expect("failed to load persona.yaml");
     let state = AppState {
         ollama: Ollama::new(&persona.ollama_url),
+        http: reqwest::Client::new(),
         db: Mutex::new(db::open().expect("failed to open database")),
         tools: tools::Registry::with_builtins(),
         calendar: calendar::Calendar::default(),
@@ -408,7 +482,11 @@ pub fn run() {
             open_config_dir,
             toggle_panel,
             hide_panel,
-            companion_bubble
+            companion_bubble,
+            brain_status,
+            brain_save_key,
+            brain_configure,
+            brain_models
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

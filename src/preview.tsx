@@ -2,7 +2,7 @@
 import Character, { Mood } from "./companion/Character";
 import "./companion/character.css";
 
-const moods: Mood[] = ["idle", "happy", "talking", "thinking", "focus", "alert", "sleepy"];
+const moods: Mood[] = ["idle", "happy", "talking", "thinking", "focus", "alert", "sleepy", "surprised", "proud", "love", "sad", "wink", "listening", "worried", "wave"];
 
 export default function Preview() {
   return (

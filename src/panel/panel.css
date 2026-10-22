@@ -417,11 +417,12 @@ button.link { border: 0; background: none; color: var(--muted); font-weight: 700
 .notif.urgent { box-shadow: var(--shadow-sm), inset 3px 0 0 var(--danger), inset 0 0 0 1px var(--border); }
 .notif.fyi { box-shadow: var(--shadow-sm), inset 3px 0 0 var(--accent-2), inset 0 0 0 1px var(--border); }
 .notif.ignore { opacity: 0.55; }
-.notif.unseen .notif-title { font-weight: 800; }
+.notif.unseen .notif-title { font-weight: 700; }
 .notif-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .source { font-weight: 800; }
-.notif-title { margin-top: 4px; font-weight: 600; }
-.notif-raw { margin-top: 2px; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-from { margin-top: 5px; font-size: 13px; }
+.notif-title { margin-top: 2px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notif-raw { margin-top: 4px; font-size: 12px; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 select.cat {
   margin-left: auto;
   height: 24px;
@@ -492,3 +493,29 @@ select.cat.urgent { color: var(--danger); }
 .switch input:checked + span { background: var(--ok); }
 .switch input:checked + span::after { transform: translateX(16px); }
 .switch.small input:checked + span::after { transform: translateX(13px); }
+
+/* brain */
+.provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.provider {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.15s, background 0.15s;
+}
+.provider:hover { box-shadow: inset 0 0 0 1.5px var(--border); }
+.provider.selected { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent-2); }
+.provider-badge { font-size: 18px; }
+.provider-name { font-weight: 800; font-size: 14px; }
+.provider-on { position: absolute; top: 8px; right: 10px; color: var(--ok); font-size: 12px; }
+.inline { display: flex; gap: 8px; }
+.inline input { flex: 1; min-width: 0; }
+.card label.check { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; color: var(--text); font-weight: 600; cursor: pointer; }
+.card label.check input { width: 17px; height: 17px; accent-color: var(--accent); }

@@ -2,20 +2,72 @@
  * Fanta - an original chibi companion drawn in SVG, so she stays crisp at any
  * size and can change expression instantly.
  */
-export type Mood = "idle" | "happy" | "talking" | "thinking" | "focus" | "alert" | "sleepy";
+export type Mood =
+  | "idle"
+  | "happy"
+  | "talking"
+  | "thinking"
+  | "focus"
+  | "alert"
+  | "sleepy"
+  | "surprised"
+  | "proud"
+  | "love"
+  | "sad"
+  | "wink"
+  | "listening"
+  | "worried"
+  | "wave";
 
 const HAIR_DARK = "#e2572b";
 const LINE = "#4a2a1c";
-
 const EY = 106; // eye center line
+
+type EyeStyle = "open" | "closed-happy" | "closed-sleepy" | "heart";
+
+function eyeStyle(mood: Mood, left: boolean): EyeStyle {
+  switch (mood) {
+    case "happy":
+    case "proud":
+      return "closed-happy";
+    case "wink":
+      return left ? "open" : "closed-happy";
+    case "sleepy":
+      return "closed-sleepy";
+    case "love":
+      return "heart";
+    default:
+      return "open";
+  }
+}
+
+/** Where the pupils look, and how wide the eyes open. */
+function gaze(mood: Mood): { dx: number; dy: number; wide: number; pupil: number } {
+  switch (mood) {
+    case "thinking":
+      return { dx: 3, dy: -3.5, wide: 1, pupil: 1 };
+    case "listening":
+      return { dx: -2.5, dy: 2.5, wide: 1, pupil: 1 };
+    case "sad":
+      return { dx: 0, dy: 2.5, wide: 0.95, pupil: 1 };
+    case "surprised":
+      return { dx: 0, dy: 0, wide: 1.15, pupil: 0.7 };
+    case "alert":
+      return { dx: 0, dy: 0, wide: 1.1, pupil: 0.85 };
+    case "worried":
+      return { dx: -1.5, dy: 0.5, wide: 0.97, pupil: 0.9 };
+    default:
+      return { dx: 0, dy: 0, wide: 1, pupil: 1 };
+  }
+}
 
 function Eye({ x, mood }: { x: number; mood: Mood }) {
   const left = x < 100;
-  // Closed, smiling eyes (^ ^) for happy; sleepy droops.
-  if (mood === "happy") {
+  const style = eyeStyle(mood, left);
+  if (style === "closed-happy") {
     return <path d={`M${x - 12} ${EY + 4} Q${x} ${EY - 10} ${x + 12} ${EY + 4}`} fill="none" stroke={LINE} strokeWidth={3.6} strokeLinecap="round" />;
   }
-  if (mood === "sleepy") {
+  if (style === "closed-sleepy") {
     return (
       <g>
         <path d={`M${x - 12} ${EY} Q${x} ${EY + 8} ${x + 12} ${EY}`} fill="none" stroke={LINE} strokeWidth={3.2} strokeLinecap="round" />
@@ -23,30 +75,67 @@ function Eye({ x, mood }: { x: number; mood: Mood }) {
       </g>
     );
   }
-  const dy = mood === "thinking" ? -3.5 : 0;
-  const dx = mood === "thinking" ? 3 : 0;
-  const k = mood === "alert" ? 1.1 : 1;
+  if (style === "heart") {
+    return (
+      <path
+        className="heart-eye"
+        d={`M${x} ${EY + 10} C${x - 16} ${EY} ${x - 12} ${EY - 12} ${x} ${EY - 5} C${x + 12} ${EY - 12} ${x + 16} ${EY} ${x} ${EY + 10} Z`}
+        fill="#ff5a6e"
+        stroke="#c93a4f"
+        strokeWidth={1.5}
+        style={{ transformOrigin: `${x}px ${EY}px` }}
+      />
+    );
+  }
+  const { dx, dy, wide: k, pupil } = gaze(mood);
   return (
     <g className="eye" style={{ transformOrigin: `${x}px ${EY}px` }}>
       <ellipse cx={x} cy={EY} rx={13 * k} ry={15.5 * k} fill="#fff" />
-      <ellipse cx={x + dx} cy={EY + 1.5 + dy} rx={10.6} ry={13.6} fill="url(#iris)" />
-      <ellipse cx={x + dx} cy={EY + 2.5 + dy} rx={5} ry={6.6} fill="#3a1a0e" />
-      {/* iris rim shading under the lid */}
-      <path d={`M${x - 10.6 + dx} ${EY - 4 + dy} Q${x + dx} ${EY - 13 + dy} ${x + 10.6 + dx} ${EY - 4 + dy}`} fill="#4a1d0c" opacity={0.45} />
-      <circle cx={x - 4 + dx} cy={EY - 5 + dy} r={4} fill="#fff" />
-      <circle cx={x + 4.5 + dx} cy={EY + 7 + dy} r={2} fill="#fff" opacity={0.9} />
-      <circle cx={x + 5.5 + dx} cy={EY - 6 + dy} r={1.3} fill="#fff" opacity={0.8} />
+      <g className="pupils">
+        <ellipse cx={x + dx} cy={EY + 1.5 + dy} rx={10.6 * pupil} ry={13.6 * pupil} fill="url(#iris)" />
+        <ellipse cx={x + dx} cy={EY + 2.5 + dy} rx={5 * pupil} ry={6.6 * pupil} fill="#3a1a0e" />
+        <path
+          d={`M${x - 10.6 * pupil + dx} ${EY - 4 + dy} Q${x + dx} ${EY - 13 * pupil + dy} ${x + 10.6 * pupil + dx} ${EY - 4 + dy}`}
+          fill="#4a1d0c"
+          opacity={0.45}
+        />
+        <circle cx={x - 4 + dx} cy={EY - 5 + dy} r={4} fill="#fff" />
+        <circle cx={x + 4.5 + dx} cy={EY + 7 + dy} r={2} fill="#fff" opacity={0.9} />
+        <circle cx={x + 5.5 + dx} cy={EY - 6 + dy} r={1.3} fill="#fff" opacity={0.8} />
+      </g>
       {/* upper lash: an even arc with a small flick at the outer corner; thin lower lash */}
       <path d={`M${x - 13.5} ${EY - 5} Q${x} ${EY - 20} ${x + 13.5} ${EY - 5}`} fill="none" stroke={LINE} strokeWidth={3.8} strokeLinecap="round" />
       <path d={left ? `M${x - 13.5} ${EY - 5} q-3 -1 -5 -4` : `M${x + 13.5} ${EY - 5} q3 -1 5 -4`} fill="none" stroke={LINE} strokeWidth={2.6} strokeLinecap="round" />
-      <path
-        d={`M${x - 7} ${EY + 15.5} Q${x} ${EY + 17.5} ${x + 7} ${EY + 15.5}`}
-        fill="none"
-        stroke={LINE}
-        strokeWidth={1.3}
-        strokeLinecap="round"
-        opacity={0.55}
-      />
+      <path d={`M${x - 7} ${EY + 15.5} Q${x} ${EY + 17.5} ${x + 7} ${EY + 15.5}`} fill="none" stroke={LINE} strokeWidth={1.3} strokeLinecap="round" opacity={0.55} />
+    </g>
+  );
+}
+
+/** Eyebrows carry most of the emotion; drawn over the bangs, half-transparent, anime style. */
+function Brows({ mood }: { mood: Mood }) {
+  // [outer y, middle y, inner y] for the left brow; the right brow mirrors it.
+  const shape: Record<Mood, [number, number, number]> = {
+    idle: [85, 80, 84],
+    happy: [83, 77, 82],
+    proud: [83, 77, 82],
+    wave: [83, 77, 82],
+    love: [83, 77, 82],
+    wink: [83, 77, 82],
+    talking: [84, 79, 83],
+    surprised: [79, 72, 77],
+    alert: [80, 74, 78],
+    sad: [86, 81, 78],
+    worried: [85, 80, 77],
+    thinking: [82, 79, 85],
+    focus: [83, 81, 85],
+    listening: [84, 78, 82],
+    sleepy: [87, 84, 86],
+  };
+  const [o, m, i] = shape[mood].map((y) => y - 4);
+  return (
+    <g className="brows" fill="none" stroke={LINE} strokeWidth={2.2} strokeLinecap="round" opacity={0.75}>
+      <path d={`M65 ${o} Q76 ${m} 87 ${i}`} />
+      <path d={`M135 ${o} Q124 ${m} 113 ${i}`} />
     </g>
   );
 }
@@ -54,29 +143,71 @@ function Eye({ x, mood }: { x: number; mood: Mood }) {
 function Mouth({ mood }: { mood: Mood }) {
   switch (mood) {
     case "happy":
+    case "proud":
+    case "wave":
       return (
         <g>
           <path d="M92 129 Q100 141 108 129 Z" fill="#c4473b" />
           <path d="M95 133.5 Q100 137 105 133.5" fill="#ff8f86" />
         </g>
       );
+    case "wink":
+      return (
+        <g>
+          <path d="M93.5 129.5 Q100 137 106.5 129.5" fill="none" stroke={LINE} strokeWidth={2.4} strokeLinecap="round" />
+          <path d="M101 133 q3 4.5 5.5 0" fill="#ff7f86" />
+        </g>
+      );
+    case "love":
+      return <path d="M92.5 130.5 q3.75 3.5 7.5 0 q3.75 3.5 7.5 0" fill="none" stroke={LINE} strokeWidth={2.3} strokeLinecap="round" />;
     case "talking":
       return <ellipse className="talk" cx={100} cy={132} rx={4.5} ry={4} fill="#c4473b" />;
     case "alert":
       return <ellipse cx={100} cy={133} rx={3.6} ry={4.4} fill="#c4473b" />;
+    case "surprised":
+      return <ellipse cx={100} cy={134} rx={4.6} ry={5.8} fill="#c4473b" />;
+    case "sad":
+      return <path d="M94.5 135 Q100 129.5 105.5 135" fill="none" stroke={LINE} strokeWidth={2.4} strokeLinecap="round" />;
+    case "worried":
+      return <path d="M93.5 133 q3.25 -2.5 6.5 0 q3.25 2.5 6.5 0" fill="none" stroke={LINE} strokeWidth={2.2} strokeLinecap="round" />;
     case "thinking":
       return <path d="M97 132 Q101 130 105 132.5" fill="none" stroke={LINE} strokeWidth={2.2} strokeLinecap="round" />;
     case "focus":
       return <path d="M96 132 L104 132" fill="none" stroke={LINE} strokeWidth={2.2} strokeLinecap="round" />;
     case "sleepy":
       return <ellipse cx={100} cy={133} rx={2.6} ry={2.2} fill="#c4473b" />;
+    case "listening":
+      return <path d="M96 131 Q100 134 104 131" fill="none" stroke={LINE} strokeWidth={2.2} strokeLinecap="round" />;
     default:
       return <path d="M94.5 130 Q100 135.5 105.5 130" fill="none" stroke={LINE} strokeWidth={2.4} strokeLinecap="round" />;
   }
 }
 
+function Sparkle({ x, y, s, delay }: { x: number; y: number; s: number; delay: number }) {
+  return (
+    <path
+      className="sparkle"
+      style={{ animationDelay: `${delay}s`, transformOrigin: `${x}px ${y}px` }}
+      d={`M${x} ${y - s} Q${x + s * 0.18} ${y - s * 0.18} ${x + s} ${y} Q${x + s * 0.18} ${y + s * 0.18} ${x} ${y + s} Q${x - s * 0.18} ${y + s * 0.18} ${x - s} ${y} Q${x - s * 0.18} ${y - s * 0.18} ${x} ${y - s} Z`}
+      fill="#ffcf4a"
+    />
+  );
+}
+
+function FloatHeart({ x, y, delay }: { x: number; y: number; delay: number }) {
+  return (
+    <path
+      className="float-heart"
+      style={{ animationDelay: `${delay}s` }}
+      d={`M${x} ${y + 7} C${x - 11} ${y} ${x - 8} ${y - 8} ${x} ${y - 3} C${x + 8} ${y - 8} ${x + 11} ${y} ${x} ${y + 7} Z`}
+      fill="#ff6b81"
+    />
+  );
+}
+
 /** `face` crops to the head, for avatars. */
 export default function Character({ mood = "idle", size = 140, face = false }: { mood?: Mood; size?: number; face?: boolean }) {
+  const blush = mood === "love" || mood === "proud" || mood === "wink" ? 0.5 : mood === "sad" ? 0.15 : 0.3;
   return (
     <svg
       className={`character mood-${mood}`}
@@ -112,7 +243,6 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
         {/* hoodie */}
         <path d="M50 220 C50 182 70 164 100 162 C130 164 150 182 150 220 Z" fill="url(#hoodie)" stroke="#e9cdb2" strokeWidth={1.5} />
         <path d="M74 170 C82 182 118 182 126 170" fill="none" stroke="#e9cdb2" strokeWidth={2} />
-        {/* drawstrings */}
         <path d="M90 178 L88 200" stroke="#ff8a3d" strokeWidth={2.4} strokeLinecap="round" />
         <path d="M110 178 L112 200" stroke="#ff8a3d" strokeWidth={2.4} strokeLinecap="round" />
         <circle cx={88} cy={202} r={2.6} fill="#e2572b" />
@@ -133,9 +263,14 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
         />
         {/* face */}
         <path d="M50 100 C50 64 74 46 100 46 C126 46 150 64 150 100 C150 132 128 153 100 155 C72 153 50 132 50 100 Z" fill="url(#skin)" />
-        {/* blush */}
-        <ellipse cx={69} cy={126} rx={9} ry={4.5} fill="#ff7f73" opacity={0.3} />
-        <ellipse cx={131} cy={126} rx={9} ry={4.5} fill="#ff7f73" opacity={0.3} />
+        <ellipse cx={69} cy={126} rx={9} ry={4.5} fill="#ff7f73" opacity={blush} />
+        <ellipse cx={131} cy={126} rx={9} ry={4.5} fill="#ff7f73" opacity={blush} />
+        {(mood === "love" || mood === "proud") && (
+          <g stroke="#ff7f73" strokeWidth={1.2} strokeLinecap="round" opacity={0.7}>
+            <path d="M64 124 l-2 4 M69 124 l-2 4 M74 124 l-2 4" />
+            <path d="M126 124 l-2 4 M131 124 l-2 4 M136 124 l-2 4" />
+          </g>
+        )}
 
         <g className="eyes">
           <Eye x={77} mood={mood} />
@@ -151,8 +286,8 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
         <path d="M100 52 C97 66 98 78 101 88 C104 78 105 66 100 52 Z" fill="url(#hair)" />
         <path d="M83 67 C86 74 86 82 85 90" fill="none" stroke={HAIR_DARK} strokeWidth={1.3} opacity={0.5} />
         <path d="M108 67 C112 74 115 82 116 90" fill="none" stroke={HAIR_DARK} strokeWidth={1.3} opacity={0.5} />
-        {/* hair shine */}
         <path d="M70 52 C80 46 92 44 104 45" fill="none" stroke="#fff3d6" strokeWidth={3} strokeLinecap="round" opacity={0.7} />
+        <Brows mood={mood} />
         {/* side locks */}
         <path d="M50 92 C44 114 46 136 56 154 C60 136 60 116 62 98 Z" fill="url(#hair)" />
         <path d="M150 92 C156 114 154 136 144 154 C140 136 140 116 138 98 Z" fill="url(#hair)" />
@@ -161,10 +296,8 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           <rect x={-9} y={-3} width={18} height={6} rx={3} fill="#fff6e8" stroke="#e2572b" strokeWidth={1.2} />
           <circle cx={9} cy={0} r={3.4} fill="#7fc8a9" />
         </g>
-        {/* ahoge */}
         <path className="ahoge" d="M100 37 C94 22 102 10 114 13 C105 17 102 25 104 37 Z" fill="url(#hair)" />
 
-        {/* headphones while focusing */}
         {mood === "focus" && (
           <g className="headphones">
             <path d="M44 98 C40 36 160 36 156 98" fill="none" stroke="#3b3a4a" strokeWidth={7} strokeLinecap="round" />
@@ -174,7 +307,26 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
             <rect x={156} y={93} width={6} height={20} rx={3} fill="#ff8a3d" />
           </g>
         )}
+        {mood === "sad" && <path className="tear" d="M66 118 q-4 7 0 9.5 q4 -2.5 0 -9.5 Z" fill="#8fd0ff" stroke="#5aa9e6" strokeWidth={0.8} />}
+        {mood === "worried" && <path className="sweat" d="M146 74 q-6 10 0 13 q6 -3 0 -13 Z" fill="#a8dcff" stroke="#6bb6ea" strokeWidth={1} />}
+        {mood === "listening" && (
+          <g className="listen-waves" fill="none" stroke="#ff8a3d" strokeWidth={2} strokeLinecap="round">
+            <path d="M28 96 q-5 8 0 16" />
+            <path d="M21 91 q-8 13 0 26" opacity={0.6} />
+          </g>
+        )}
       </g>
+
+      {/* raised arm (sleeve + hand) for waving and cheering, in front of the hair */}
+      {(mood === "wave" || mood === "proud") && (
+        <g className={mood === "wave" ? "hand waving" : "hand cheer"}>
+          <path d="M138 198 C146 184 153 172 160 162" stroke="#e2c4a6" strokeWidth={17} strokeLinecap="round" fill="none" />
+          <path d="M138 198 C146 184 153 172 160 162" stroke="#fff6ec" strokeWidth={14} strokeLinecap="round" fill="none" />
+          <path d="M152 170 l9 5" stroke="#ff8a3d" strokeWidth={3} strokeLinecap="round" />
+          <circle cx={162} cy={154} r={9.5} fill="#ffe3d3" stroke="#e8b89c" strokeWidth={1.4} />
+          <path d="M156 147 q2 -5 5.5 -1.5 M161.5 145.5 q2.5 -5 5.5 -1" stroke="#e8b89c" strokeWidth={1.4} fill="none" strokeLinecap="round" />
+        </g>
+      )}
 
       {mood === "thinking" && (
         <g className="thought" fill="#fff" stroke="#e9cdb2" strokeWidth={1.5}>
@@ -183,10 +335,11 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           <circle cx={186} cy={14} r={8} />
         </g>
       )}
-      {mood === "alert" && (
+      {(mood === "alert" || mood === "surprised") && (
         <g className="alert-mark">
           <path d="M168 20 L166 46" stroke="#e2572b" strokeWidth={6} strokeLinecap="round" />
           <circle cx={165} cy={57} r={3.6} fill="#e2572b" />
+          {mood === "surprised" && <path d="M181 26 L177 44" stroke="#ff8a3d" strokeWidth={4.5} strokeLinecap="round" />}
         </g>
       )}
       {mood === "sleepy" && (
@@ -194,6 +347,22 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           z
         </text>
       )}
+      {mood === "proud" && (
+        <g>
+          <Sparkle x={30} y={52} s={9} delay={0} />
+          <Sparkle x={172} y={40} s={11} delay={0.3} />
+          <Sparkle x={184} y={110} s={7} delay={0.6} />
+          <Sparkle x={20} y={110} s={6} delay={0.45} />
+        </g>
+      )}
+      {mood === "love" && (
+        <g>
+          <FloatHeart x={162} y={56} delay={0} />
+          <FloatHeart x={36} y={64} delay={0.5} />
+          <FloatHeart x={178} y={90} delay={1} />
+        </g>
+      )}
+      {mood === "wink" && <Sparkle x={152} y={92} s={7} delay={0} />}
     </svg>
   );
 }

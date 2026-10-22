@@ -7,7 +7,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::llm::Message;
-use crate::{calendar, db, desktop, focus, AppState};
+use crate::{brain, calendar, db, desktop, focus, AppState};
 
 const TICK: Duration = Duration::from_secs(15);
 /// Nudge after this long without a focus block (and no more often than this).
@@ -141,6 +141,5 @@ pub async fn speak(app: &AppHandle, extra: &str, instruction: &str) -> anyhow::R
         Message::new("system", state.persona.full_system_prompt()),
         Message::new("user", format!("[Internal trigger, not from the user]\n{context}\n\n{instruction}")),
     ];
-    let reply = state.ollama.chat(&state.persona.model, &messages, &[], |_| {}).await?;
-    Ok(reply.content.trim().to_string())
+    brain::background(app, &messages).await
 }

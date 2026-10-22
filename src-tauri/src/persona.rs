@@ -38,6 +38,8 @@ notifications:
   # Apps to ignore entirely, e.g. [Spotify, Rhythmbox].
   muted_apps: []
   keep_days: 14
+  # Speech bubbles for incoming messages: messages (chat + urgent), urgent, or off.
+  bubbles: messages
 
 system_prompt: |
   You are Fanta, a calm, grounded productivity coach who lives on the user's
@@ -85,6 +87,9 @@ pub struct NotificationConfig {
     pub urgent_keywords: Vec<String>,
     pub muted_apps: Vec<String>,
     pub keep_days: u32,
+    /// Which messages Fanta reads out in a speech bubble: "messages" (chat
+    /// messages and anything urgent), "urgent", or "off".
+    pub bubbles: String,
 }
 
 impl Default for NotificationConfig {
@@ -97,6 +102,7 @@ impl Default for NotificationConfig {
                 .to_vec(),
             muted_apps: vec![],
             keep_days: 14,
+            bubbles: "messages".into(),
         }
     }
 }

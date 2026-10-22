@@ -396,10 +396,7 @@ fn list_notifications(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
     }
     Ok(items
         .iter()
-        .map(|n| {
-            let what = n.summary.clone().unwrap_or_else(|| format!("{}: {}", n.title, n.body.chars().take(140).collect::<String>()));
-            format!("[{}] {} {} · {}", n.category, friendly(&n.received_at), n.source, what)
-        })
+        .map(|n| format!("[{}] {}", n.category, crate::notifications::describe(n)))
         .collect::<Vec<_>>()
         .join("\n"))
 }

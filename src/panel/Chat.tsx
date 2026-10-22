@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { api, ApprovalRequest } from "../api";
 import Character from "../companion/Character";
+import { UI_EVENTS } from "../companion/useMood";
 import { SendIcon, ShieldIcon } from "../ui/Icons";
 
 type Msg =
@@ -48,6 +49,7 @@ export default function Chat({ name }: { name: string }) {
   const [toolNote, setToolNote] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const lastTyping = useRef(0);
 
   useEffect(() => {
     api.history().then((h) => setMessages(h.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))));
@@ -87,11 +89,13 @@ export default function Chat({ name }: { name: string }) {
     setDraft("");
     setBusy(true);
     setMessages((prev) => [...prev, { role: "user", content: text }]);
-    emit("ui://thinking");
+    emit(UI_EVENTS.userMessage, text);
+    emit(UI_EVENTS.thinking);
     try {
       await api.send(text);
     } catch (err) {
       setMessages((prev) => [...prev, { role: "error", content: String(err) }]);
+      emit(UI_EVENTS.error);
     } finally {
       setBusy(false);
       setToolNote(null);
@@ -190,6 +194,12 @@ export default function Chat({ name }: { name: string }) {
           placeholder={`Message ${name}…`}
           onChange={(e) => {
             setDraft(e.target.value);
+            // Let Fanta "listen" while you type (at most once a second).
+            const t = Date.now();
+            if (t - lastTyping.current > 1000) {
+              lastTyping.current = t;
+              emit(UI_EVENTS.typing);
+            }
             e.target.style.height = "auto";
             e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
           }}

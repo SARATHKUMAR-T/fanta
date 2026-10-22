@@ -29,3 +29,37 @@
 @media (prefers-reduced-motion: reduce) {
   .character * { animation: none !important; }
 }
+
+/* ---- extra moods ---- */
+.character .pupils { animation: glance 9s ease-in-out infinite; }
+.mood-thinking .pupils, .mood-listening .pupils, .mood-sad .pupils, .mood-surprised .pupils { animation: none; }
+.mood-surprised .head { animation: jolt 0.45s ease-out 1, sway 5.2s ease-in-out 0.5s infinite; }
+.mood-listening .head { animation: none; transform: rotate(-6deg); transition: transform 0.3s; transform-origin: 100px 150px; }
+.mood-sad .head { animation: droop 3s ease-in-out infinite; }
+.mood-worried .head { animation: fidget 1.4s ease-in-out infinite; }
+.mood-proud .head, .mood-wave .head { animation: hop 0.9s ease-in-out infinite; }
+.mood-love .head { animation: sway 2.6s ease-in-out infinite; }
+.mood-wink .head { animation: tilt-wink 0.6s ease-out 1 forwards; }
+.character .hand.waving { animation: wave 0.55s ease-in-out infinite alternate; transform-origin: 138px 198px; }
+.character .hand.cheer { animation: cheer 0.9s ease-in-out infinite; transform-origin: 138px 198px; }
+.character .heart-eye { animation: heartbeat 0.8s ease-in-out infinite; }
+.character .sparkle { animation: twinkle 1.2s ease-in-out infinite; }
+.character .float-heart { animation: float-up 2.2s ease-in infinite; }
+.character .tear { animation: tear 2s ease-in infinite; }
+.character .sweat { animation: sweat 1.6s ease-in-out infinite; }
+.character .listen-waves path { animation: ping 1.2s ease-out infinite; }
+.character .listen-waves path:nth-child(2) { animation-delay: 0.3s; }
+
+@keyframes glance { 0%, 40%, 100% { transform: translateX(0); } 44%, 52% { transform: translateX(-2.5px); } 56%, 64% { transform: translateX(2.5px); } 68% { transform: translateX(0); } }
+@keyframes jolt { 0% { transform: translateY(0) scale(1); } 30% { transform: translateY(-9px) scale(1.04); } 100% { transform: translateY(0) scale(1); } }
+@keyframes droop { 0%, 100% { transform: rotate(3deg) translateY(3px); } 50% { transform: rotate(4deg) translateY(4px); } }
+@keyframes fidget { 0%, 100% { transform: rotate(-1.5deg); } 50% { transform: rotate(1.5deg) translateX(1px); } }
+@keyframes tilt-wink { to { transform: rotate(5deg); } }
+@keyframes wave { from { transform: rotate(-14deg); } to { transform: rotate(16deg); } }
+@keyframes cheer { 0%, 100% { transform: rotate(0deg) translateY(0); } 50% { transform: rotate(-8deg) translateY(-6px); } }
+@keyframes heartbeat { 0%, 100% { transform: scale(1); } 40% { transform: scale(1.18); } }
+@keyframes twinkle { 0%, 100% { transform: scale(0.4) rotate(0deg); opacity: 0.3; } 50% { transform: scale(1.1) rotate(45deg); opacity: 1; } }
+@keyframes float-up { 0% { transform: translateY(8px); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateY(-26px); opacity: 0; } }
+@keyframes tear { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(16px); opacity: 0; } }
+@keyframes sweat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+@keyframes ping { 0% { opacity: 0; transform: translateX(4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateX(-4px); } }

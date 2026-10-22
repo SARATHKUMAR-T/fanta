@@ -10,7 +10,15 @@ const empty = params.has("empty");
 const focusing = params.has("focus");
 
 const data: Record<string, (args: any) => unknown> = {
-  get_persona: () => ({ name: "Fanta", tagline: "your calm focus coach", model: "qwen3:4b-instruct" }),
+  get_persona: () => ({ name: "Fanta", tagline: "your calm focus coach", model: "qwen3:4b-instruct", notifications: { bubbles: "messages" } }),
+  brain_status: () => ({
+    provider: "anthropic",
+    model: "claude-opus-5-5",
+    background: false,
+    keys: { anthropic: true, openai: false, gemini: false },
+    models: { anthropic: "claude-opus-5-5", openai: "", gemini: "" },
+    local_model: "qwen3:4b-instruct",
+  }),
   get_history: () =>
     empty
       ? []
@@ -35,9 +43,9 @@ const data: Record<string, (args: any) => unknown> = {
   }),
   inbox_unseen: () => 3,
   list_notifications: () => [
-    { id: 3, app: "Google Chrome", source: "Teams", title: "Lakshmi", body: "Need the Q4 numbers before the 3:30 sync", category: "urgent", summary: "Lakshmi needs Q4 numbers before 3:30 sync", reason: "manager request", during_focus: true, seen: false, received_at: ts(-12) },
-    { id: 2, app: "Google Chrome", source: "Teams", title: "Design team", body: "Kiran posted new icons", category: "fyi", summary: "Kiran shared the new icon set", reason: "update", during_focus: false, seen: false, received_at: ts(-40) },
-    { id: 1, app: "Thunderbird", source: "Thunderbird", title: "Invoice #881", body: "Your invoice is ready", category: "fyi", summary: "Invoice #881 is ready", reason: "email", during_focus: false, seen: true, received_at: ts(-90) },
+    { id: 3, app: "Google Chrome", source: "Teams", title: "Lakshmi", body: "Need the Q4 numbers before the 3:30 sync", sender: "Lakshmi", chat: null, text: "Need the Q4 numbers before the 3:30 sync - can you send them now?", category: "urgent", summary: "Lakshmi needs Q4 numbers before 3:30 sync", reason: "manager request", during_focus: true, seen: false, received_at: ts(-12) },
+    { id: 2, app: "Google Chrome", source: "Teams", title: "Aarthi Selvakumari, +3", body: "Akilesh: customer grievance agent?", sender: "Akilesh", chat: "Aarthi Selvakumari, +3", text: "customer grievance agent? or should we keep it generic", category: "fyi", summary: "Akilesh asks about grievance agent", reason: "update", during_focus: false, seen: false, received_at: ts(-40) },
+    { id: 1, app: "Thunderbird", source: "Thunderbird", title: "Invoice #881", body: "Your invoice is ready", sender: "Invoice #881", chat: null, text: "Your invoice is ready", category: "fyi", summary: "Invoice #881 is ready", reason: "email", during_focus: false, seen: true, received_at: ts(-90) },
   ],
   calendar_status: () => ({ provider: "graph", account: "Sarath <sarath@example.com>", last_sync: ts(-2), error: null, can_write: true, client_id: "x", tenant: "y" }),
   calendar_events: () => [
