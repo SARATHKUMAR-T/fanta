@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, PluginInfo } from "../api";
+import { api, AppCli, PluginInfo } from "../api";
 import { PlugIcon, RefreshIcon, TrashIcon } from "../ui/Icons";
 
 const EXAMPLES = [
@@ -25,6 +25,13 @@ export default function Plugins() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: "", command: "", triggers: "" });
   const [error, setError] = useState<string | null>(null);
+  const [appClis, setAppClis] = useState<AppCli[] | null>(null);
+  const scanAppClis = () => {
+    setAppClis(null);
+    api.appClis().then(setAppClis);
+  };
+
+  useEffect(scanAppClis, []);
 
   useEffect(() => {
     const refresh = () => api.pluginsInfo().then(setPlugins);
@@ -179,6 +186,38 @@ export default function Plugins() {
         </div>
       )}
       {error && <p className="error-text">{error}</p>}
+
+      <div className="subhead">
+        <div className="plugin-name">App CLIs</div>
+        <button className="icon-btn" title="Look again" onClick={scanAppClis}>
+          <RefreshIcon size={16} />
+        </button>
+      </div>
+      <p className="muted small">
+        <a href="#" onClick={(e) => { e.preventDefault(); api.openLink("https://github.com/HKUDS/CLI-Anything"); }}>CLI-Anything</a> commands
+        let me drive GIMP, LibreOffice, Blender, Inkscape, OBS and more. Running one always asks you first.
+      </p>
+      {appClis === null ? (
+        <p className="muted small empty-line">Looking…</p>
+      ) : appClis.length === 0 ? (
+        <p className="muted small empty-line">
+          None installed. In a terminal: <code>pip install cli-anything-hub</code>, then <code>cli-hub install gimp</code> (or libreoffice, blender…).
+        </p>
+      ) : (
+        <ul className="plugin-list">
+          {appClis.map((c) => (
+            <li key={c.app} className="plugin">
+              <div className="plugin-row">
+                <span className="dot running" />
+                <div className="plugin-main">
+                  <div className="plugin-name">{c.app}</div>
+                  <div className="muted tiny">{c.description ?? c.path}</div>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

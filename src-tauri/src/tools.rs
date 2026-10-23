@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::calendar::{self, graph::NewMeeting};
-use crate::{db, focus, system, AppState};
+use crate::{apps, db, focus, system, AppState};
 
 type SyncHandler = fn(&AppHandle, &Value) -> anyhow::Result<String>;
 type AsyncHandler = fn(AppHandle, Value) -> BoxFuture<'static, anyhow::Result<String>>;
@@ -305,6 +305,40 @@ impl Registry {
                     }),
                     |_, args| Box::pin(async move { system::open_app(&args) }),
                     Some(|_, args| system::describe_open(args)),
+                ),
+                tool(
+                    "list_app_clis",
+                    "List the CLI-Anything app CLIs installed (GIMP, LibreOffice, Blender, Inkscape, OBS...), which let you operate those apps from the command line.",
+                    json!({ "type": "object", "properties": {} }),
+                    |_, args| apps::list(args),
+                ),
+                async_tool(
+                    "app_cli_help",
+                    "Read how to use an installed CLI-Anything app CLI: its full guide, or the --help of one subcommand. Always check this before run_app_cli.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "app": { "type": "string", "description": "e.g. 'gimp', from list_app_clis" },
+                            "subcommand": { "type": "string", "description": "e.g. 'layer add'. Omit for the full guide." }
+                        },
+                        "required": ["app"]
+                    }),
+                    |_, args| Box::pin(async move { apps::help(&args).await }),
+                    None,
+                ),
+                async_tool(
+                    "run_app_cli",
+                    "Run a CLI-Anything app command with JSON output, e.g. app 'libreoffice', args ['document', 'export', 'report.docx', '--format', 'pdf']. The user sees the exact command and must approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "app": { "type": "string" },
+                            "args": { "type": "array", "items": { "type": "string" }, "description": "Subcommand and options, without the program name or --json" }
+                        },
+                        "required": ["app", "args"]
+                    }),
+                    |_, args| Box::pin(async move { apps::run_tool(&args).await }),
+                    Some(|_, args| apps::describe_run(args)),
                 ),
                 tool(
                     "focus_status",

@@ -148,6 +148,10 @@ what they missed or about messages. \
 To answer someone on Teams use teams_reply (the chat their message came from) or teams_send_message \
 (a person's 1:1 chat or a named chat). Write the message in the user's own voice, first person, \
 without adding anything they didn't ask for; the user approves it before it's sent. \
+You can also work on the user's computer: list_dir/read_file for files, run_command for the shell, \
+open_app to launch apps, browser plugin tools for websites, and CLI-Anything app CLIs (list_app_clis, \
+then app_cli_help before run_app_cli). Look before you act (snapshot the page, list the folder), \
+take one step at a time, and if the user declines a step, stop and ask. \
 After a tool runs, confirm in one short sentence.";
 
 impl Persona {

@@ -136,6 +136,8 @@ export type ReplyTarget = { id: number; sender: string; chat: string | null; tex
 
 export type PluginTool = { name: string; description: string; read_only: boolean; auto_approve: boolean };
 
+export type AppCli = { app: string; path: string; description: string | null };
+
 export type PluginInfo = {
   name: string;
   status: "disabled" | "starting" | "running" | "error";
@@ -192,6 +194,7 @@ export const api = {
   hidePanel: () => invoke<void>("hide_panel"),
   companionBubble: (visible: boolean) => invoke<void>("companion_bubble", { visible }),
   pluginsInfo: () => invoke<PluginInfo[]>("plugins_info"),
+  appClis: () => invoke<AppCli[]>("app_clis"),
   pluginsReload: () => invoke<void>("plugins_reload"),
   pluginAdd: (name: string, command: string, triggers: string) => invoke<void>("plugin_add", { name, command, triggers }),
   pluginRemove: (name: string) => invoke<void>("plugin_remove", { name }),

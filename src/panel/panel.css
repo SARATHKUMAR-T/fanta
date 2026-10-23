@@ -685,3 +685,4 @@ select.cat.urgent { color: var(--danger); }
 .focus-pill.paused { opacity: 0.85; }
 
 .preset { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 8px 0; border-radius: 12px; background: var(--surface-2); }
+.subhead { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }

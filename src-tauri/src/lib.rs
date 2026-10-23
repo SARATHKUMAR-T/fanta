@@ -1,4 +1,5 @@
 mod approvals;
+mod apps;
 mod brain;
 mod calendar;
 mod cloud;
@@ -149,7 +150,7 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
     }
     // Shell and file writes need a model that can plan multi-step work.
     if !cloud {
-        schemas.retain(|t| !matches!(t["function"]["name"].as_str(), Some("run_command" | "write_file")));
+        schemas.retain(|t| !matches!(t["function"]["name"].as_str(), Some("run_command" | "write_file" | "run_app_cli")));
     }
     // Cloud models handle many tools well; the small local model gets only the plugins mentioned.
     schemas.extend(if cloud { state.plugins.all_schemas() } else { state.plugins.schemas_for(&routing_context) });
@@ -441,6 +442,11 @@ fn open_link(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn app_clis() -> Vec<apps::AppCli> {
+    tauri::async_runtime::spawn_blocking(apps::discover).await.unwrap_or_default()
+}
+
+#[tauri::command]
 fn plugins_info(state: State<'_, AppState>) -> Vec<plugins::PluginInfo> {
     state.plugins.info()
 }
@@ -688,6 +694,7 @@ pub fn run() {
             set_notification_category,
             answer_approval,
             chat_stop,
+            app_clis,
             calendar_status,
             calendar_sign_in,
             calendar_connect_ics,
