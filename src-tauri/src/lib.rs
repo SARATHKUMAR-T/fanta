@@ -34,6 +34,8 @@ const VOICE_SHORTCUT: &str = "ctrl+alt+space";
 const MAX_TOOL_ROUNDS: usize = 5;
 /// Cloud models can drive a browser or app, which takes many steps.
 const MAX_CLOUD_TOOL_ROUNDS: usize = 40;
+/// Screenshots kept in a turn's context at once.
+const MAX_IMAGES: usize = 3;
 
 pub struct AppState {
     pub persona: Persona,
@@ -194,10 +196,10 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         messages.push(reply);
         for call in calls {
             let (name, args) = (&call.function.name, &call.function.arguments);
-            let result = if state.chat_cancel.load(Ordering::SeqCst) {
-                "error: the user pressed Stop".to_string()
+            let (result, images) = if state.chat_cancel.load(Ordering::SeqCst) {
+                ("error: the user pressed Stop".to_string(), vec![])
             } else if cloud::invalid_args(args) {
-                "error: the tool arguments weren't valid JSON - try the call again".to_string()
+                ("error: the tool arguments weren't valid JSON - try the call again".to_string(), vec![])
             } else {
                 dispatch(&app, &state, name, args, cloud).await
             };
@@ -207,10 +209,27 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
             let mut msg = Message::new("tool", result);
             msg.tool_name = Some(call.function.name);
             msg.tool_call_id = call.id;
+            if cloud && !images.is_empty() {
+                msg.images = images;
+                keep_recent_images(&mut messages, MAX_IMAGES - 1);
+            }
             messages.push(msg);
         }
     }
     Err("Too many tool rounds; stopping.".into())
+}
+
+/// Drops screenshots from all but the `keep` most recent tool results: old
+/// screens are stale and each one costs over a thousand tokens per round.
+fn keep_recent_images(messages: &mut [Message], keep: usize) {
+    let mut seen = 0;
+    for m in messages.iter_mut().rev().filter(|m| !m.images.is_empty()) {
+        seen += 1;
+        if seen > keep {
+            m.images.clear();
+            m.content.push_str("\n[screenshot removed - take a new one if needed]");
+        }
+    }
 }
 
 /// Ends a turn the user stopped, keeping a record of what already ran.
@@ -258,7 +277,7 @@ fn teams_not_connected_request(app: &AppHandle, text: &str) -> bool {
 }
 
 /// Runs one tool call (built-in or plugin), asking the user first when required.
-async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_json::Value, cloud: bool) -> String {
+async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_json::Value, cloud: bool) -> (String, Vec<llm::Image>) {
     let is_plugin = state.plugins.is_plugin_tool(name);
     let approval = if is_plugin {
         state.plugins.approval_text(name, args).map(Ok)
@@ -266,11 +285,11 @@ async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_js
         state.tools.approval(app, name, args)
     };
     match approval {
-        Some(Err(e)) => return format!("error: {e}"),
+        Some(Err(e)) => return (format!("error: {e}"), vec![]),
         Some(Ok(description)) => {
             let _ = app.emit("chat://tool", "waiting for your approval");
             if !approvals::ask(app, name, &description).await {
-                return "The user declined this action. Acknowledge briefly; don't retry unless they ask.".into();
+                return ("The user declined this action. Acknowledge briefly; don't retry unless they ask.".into(), vec![]);
             }
         }
         None => {}
@@ -279,7 +298,7 @@ async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_js
     if is_plugin {
         state.plugins.call(name, args, plugins::result_limit(cloud)).await
     } else {
-        state.tools.call(app, name, args).await
+        (state.tools.call(app, name, args).await, vec![])
     }
 }
 
@@ -459,6 +478,12 @@ async fn plugins_reload(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn plugin_add(app: AppHandle, name: String, command: String, triggers: String) -> Result<(), String> {
     plugins::add(&name, &command, &triggers).map_err(err)?;
+    plugins::reload(&app).await.map_err(err)
+}
+
+#[tauri::command]
+async fn plugin_add_desktop(app: AppHandle) -> Result<(), String> {
+    plugins::add_desktop().map_err(err)?;
     plugins::reload(&app).await.map_err(err)
 }
 
@@ -695,6 +720,7 @@ pub fn run() {
             answer_approval,
             chat_stop,
             app_clis,
+            plugin_add_desktop,
             calendar_status,
             calendar_sign_in,
             calendar_connect_ics,

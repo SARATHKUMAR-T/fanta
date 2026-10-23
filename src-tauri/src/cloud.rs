@@ -93,10 +93,16 @@ fn anthropic_messages(messages: &[Message]) -> (String, Vec<Value>) {
                 };
                 ("assistant", content)
             }
-            "tool" => (
-                "user",
-                json!([{ "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": m.content }]),
-            ),
+            "tool" => {
+                let content = if m.images.is_empty() {
+                    json!(m.content)
+                } else {
+                    let mut blocks = vec![json!({ "type": "text", "text": m.content })];
+                    blocks.extend(m.images.iter().map(|i| json!({ "type": "image", "source": { "type": "base64", "media_type": i.mime, "data": i.data } })));
+                    Value::Array(blocks)
+                };
+                ("user", json!([{ "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": content }]))
+            }
             _ => ("user", json!([{ "type": "text", "text": m.content }])),
         };
         // Merge consecutive same-role turns (all tool results go back in one user message).
@@ -267,7 +273,12 @@ fn openai_messages(messages: &[Message]) -> Vec<Value> {
     if !system.is_empty() {
         out.push(json!({ "role": "system", "content": system }));
     }
+    // Tool messages can't carry images here, so screenshots follow the tool results as a user message.
+    let mut pending_images: Vec<Value> = vec![];
     for m in messages.iter().filter(|m| m.role != "system") {
+        if m.role != "tool" && !pending_images.is_empty() {
+            out.push(image_message(std::mem::take(&mut pending_images)));
+        }
         match m.role.as_str() {
             "assistant" if !m.tool_calls.is_empty() => out.push(json!({
                 "role": "assistant",
@@ -290,11 +301,23 @@ fn openai_messages(messages: &[Message]) -> Vec<Value> {
                     out.push(json!({ "role": "assistant", "content": m.content }));
                 }
             }
-            "tool" => out.push(json!({ "role": "tool", "tool_call_id": m.tool_call_id.clone().unwrap_or_default(), "content": m.content })),
+            "tool" => {
+                out.push(json!({ "role": "tool", "tool_call_id": m.tool_call_id.clone().unwrap_or_default(), "content": m.content }));
+                pending_images.extend(m.images.iter().map(|i| json!({ "type": "image_url", "image_url": { "url": format!("data:{};base64,{}", i.mime, i.data) } })));
+            }
             _ => out.push(json!({ "role": "user", "content": m.content })),
         }
     }
+    if !pending_images.is_empty() {
+        out.push(image_message(pending_images));
+    }
     out
+}
+
+fn image_message(images: Vec<Value>) -> Value {
+    let mut content = vec![json!({ "type": "text", "text": "Screenshot from the tool call above:" })];
+    content.extend(images);
+    json!({ "role": "user", "content": content })
 }
 
 pub async fn openai_chat(
@@ -425,6 +448,26 @@ mod tests {
         assert_eq!(out[1]["content"][1]["type"], "tool_use");
         assert_eq!(out[2]["content"][0]["tool_use_id"], "toolu_1");
         assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn screenshots_reach_both_apis() {
+        let mut call = Message::new("assistant", "");
+        call.tool_calls.push(ToolCall { id: Some("c1".into()), function: ToolCallFunction { name: "shot".into(), arguments: json!({}) }, extra: Map::new() });
+        let mut result = Message::new("tool", "screen");
+        result.tool_call_id = Some("c1".into());
+        result.images.push(crate::llm::Image { mime: "image/png".into(), data: "AAAA".into() });
+        let msgs = vec![Message::new("user", "look"), call, result, Message::new("user", "and now?")];
+
+        let (_, out) = anthropic_messages(&msgs);
+        let blocks = &out[2]["content"][0]["content"];
+        assert_eq!(blocks[1]["source"]["data"], "AAAA");
+        assert_eq!(out[2]["content"][1]["text"], "and now?"); // merged into the same user turn
+
+        let out = openai_messages(&msgs);
+        assert_eq!(out[2]["role"], "tool");
+        assert_eq!(out[3]["content"][1]["image_url"]["url"], "data:image/png;base64,AAAA");
+        assert_eq!(out[4]["content"], "and now?");
     }
 
     #[test]

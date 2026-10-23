@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::llm::Image;
 use crate::{persona, AppState};
 use mcp::{Connection, Event, McpTool};
 
@@ -27,6 +28,31 @@ const SEP: &str = "__";
 
 pub fn result_limit(cloud: bool) -> usize {
     if cloud { MAX_CLOUD_RESULT_CHARS } else { MAX_RESULT_CHARS }
+}
+
+/// Fanta's own desktop-control MCP server (AT-SPI + screenshots), written to the
+/// config folder so the plugin entry can run it with the system python3.
+const DESKTOP_SCRIPT: &str = include_str!("../../resources/desktop_mcp.py");
+
+fn desktop_script_path() -> PathBuf {
+    persona::config_dir().join("desktop_mcp.py")
+}
+
+/// Keeps the installed desktop script in step with this build.
+fn write_desktop_script() -> anyhow::Result<()> {
+    let path = desktop_script_path();
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(DESKTOP_SCRIPT) {
+        std::fs::create_dir_all(persona::config_dir())?;
+        std::fs::write(&path, DESKTOP_SCRIPT)?;
+    }
+    Ok(())
+}
+
+/// Adds the built-in "desktop" plugin: read and operate any accessible app window.
+pub fn add_desktop() -> anyhow::Result<()> {
+    write_desktop_script()?;
+    let cmd = shell_words::join(["python3", &desktop_script_path().to_string_lossy()]);
+    add("desktop", &cmd, "app, apps, window, screen, screenshot, click, button, desktop, editor, type, menu")
 }
 
 pub fn config_path() -> PathBuf {
@@ -192,6 +218,9 @@ pub async fn reload(app: &AppHandle) -> anyhow::Result<()> {
     }
     host.plugins.lock().unwrap().clear();
 
+    if let Err(e) = write_desktop_script() {
+        eprintln!("couldn't update the desktop plugin script: {e}");
+    }
     let cfg = read_config()?;
     for (name, v) in servers(&cfg) {
         let plugin = Arc::new(Plugin {
@@ -358,28 +387,32 @@ impl Host {
         Some(format!("Run {} › {} with {shown}", p.name, t.name))
     }
 
-    pub async fn call(&self, exposed: &str, args: &Value, max_chars: usize) -> String {
+    /// The tool's text output, plus any images it returned.
+    pub async fn call(&self, exposed: &str, args: &Value, max_chars: usize) -> (String, Vec<Image>) {
         let Some((p, t)) = self.resolve(exposed) else {
-            return format!("error: unknown plugin tool '{exposed}'");
+            return (format!("error: unknown plugin tool '{exposed}'"), vec![]);
         };
         let conn = p.conn.lock().unwrap().clone();
         let Some(conn) = conn else {
-            return format!("error: plugin '{}' isn't running", p.name);
+            return (format!("error: plugin '{}' isn't running", p.name), vec![]);
         };
-        match conn.call_tool(&t.name, args, CALL_TIMEOUT).await {
+        let result = conn.call_tool_raw(&t.name, args, CALL_TIMEOUT).await;
+        let images = result.as_ref().map(mcp::content_images).unwrap_or_default();
+        let text = match result.map(|r| (mcp::content_to_text(&r), r["isError"].as_bool().unwrap_or(false))) {
             Ok((text, is_error)) => {
                 let mut text = if is_error { format!("error: {text}") } else { text };
                 if text.chars().count() > max_chars {
                     text = text.chars().take(max_chars).collect::<String>() + "\n…(truncated)";
                 }
-                if text.trim().is_empty() {
+                if text.trim().is_empty() && images.is_empty() {
                     "(no output)".into()
                 } else {
                     text
                 }
             }
             Err(e) => format!("error: {e}"),
-        }
+        };
+        (text, images)
     }
 }
 

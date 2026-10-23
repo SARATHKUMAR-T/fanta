@@ -42,11 +42,21 @@ pub struct Message {
     /// replayed unchanged within a tool loop. Never sent to Ollama.
     #[serde(skip)]
     pub raw: Option<Value>,
+    /// Images a tool returned (screenshots), shown to cloud models. Never sent to Ollama.
+    #[serde(skip)]
+    pub images: Vec<Image>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    pub mime: String,
+    /// Base64, as MCP servers send it.
+    pub data: String,
 }
 
 impl Message {
     pub fn new(role: &str, content: impl Into<String>) -> Self {
-        Self { role: role.into(), content: content.into(), tool_calls: vec![], tool_name: None, tool_call_id: None, raw: None }
+        Self { role: role.into(), content: content.into(), tool_calls: vec![], tool_name: None, tool_call_id: None, raw: None, images: vec![] }
     }
 }
 

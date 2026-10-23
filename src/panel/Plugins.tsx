@@ -9,13 +9,20 @@ const EXAMPLES = [
 ];
 
 // Ready-made plugins that give Fanta hands on the computer. One click adds them.
-const PRESETS = [
+type Preset = { name: string; label: string; hint: string } & ({ command: string; triggers: string } | { install: () => Promise<void> });
+const PRESETS: Preset[] = [
   {
     name: "browser",
     label: "Web browser",
     hint: "Opens sites, reads pages, clicks and fills forms in its own Chromium window.",
     command: "npx -y @playwright/mcp@0.0.83 --user-data-dir ~/.config/fanta/browser",
     triggers: "web, browser, site, website, page, open, search, google, url, link",
+  },
+  {
+    name: "desktop",
+    label: "Desktop apps",
+    hint: "Reads and clicks the windows of any app through Linux accessibility, and takes screenshots.",
+    install: () => api.pluginAddDesktop(),
   },
 ];
 
@@ -84,7 +91,7 @@ export default function Plugins() {
             <div className="plugin-name">{x.label}</div>
             <div className="muted tiny">{x.hint}</div>
           </div>
-          <button className="btn soft" onClick={() => run(() => api.pluginAdd(x.name, x.command, x.triggers))}>
+          <button className="btn soft" onClick={() => run(() => ("install" in x ? x.install() : api.pluginAdd(x.name, x.command, x.triggers)))}>
             Add
           </button>
         </div>

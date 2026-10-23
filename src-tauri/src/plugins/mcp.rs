@@ -202,9 +202,14 @@ impl Connection {
 
     /// Calls a tool and flattens its content to text for the model.
     pub async fn call_tool(&self, name: &str, args: &Value, timeout: Duration) -> anyhow::Result<(String, bool)> {
-        let args = if args.is_object() { args.clone() } else { json!({}) };
-        let result = self.request("tools/call", json!({ "name": name, "arguments": args }), timeout).await?;
+        let result = self.call_tool_raw(name, args, timeout).await?;
         Ok((content_to_text(&result), result["isError"].as_bool().unwrap_or(false)))
+    }
+
+    /// The whole `tools/call` result, for callers that want more than the text.
+    pub async fn call_tool_raw(&self, name: &str, args: &Value, timeout: Duration) -> anyhow::Result<Value> {
+        let args = if args.is_object() { args.clone() } else { json!({}) };
+        self.request("tools/call", json!({ "name": name, "arguments": args }), timeout).await
     }
 
     pub fn stderr_hint(&self) -> String {
@@ -224,6 +229,17 @@ impl Connection {
             let _ = child.start_kill();
         }
     }
+}
+
+/// Image blocks in a tool result.
+pub fn content_images(result: &Value) -> Vec<crate::llm::Image> {
+    result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["type"] == "image")
+        .filter_map(|c| Some(crate::llm::Image { mime: c["mimeType"].as_str()?.to_string(), data: c["data"].as_str()?.to_string() }))
+        .collect()
 }
 
 pub fn content_to_text(result: &Value) -> String {
@@ -320,6 +336,22 @@ mod tests {
 #[cfg(test)]
 mod real_server_tests {
     use super::*;
+
+    /// Needs python3-gi and a desktop session: `cargo test -- --ignored desktop_server`
+    #[tokio::test]
+    #[ignore]
+    async fn desktop_server() {
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/desktop_mcp.py");
+        let conn = Connection::start("python3", &[script.into()], &HashMap::new(), Duration::from_secs(10), |_| {}).await.unwrap();
+        let tools = conn.list_tools().await.unwrap();
+        let read_only: Vec<&str> = tools.iter().filter(|t| t.read_only).map(|t| t.name.as_str()).collect();
+        assert_eq!(read_only, ["list_windows", "window_tree", "find", "read_text", "screenshot"]);
+        let (text, is_error) = conn.call_tool("list_windows", &json!({}), Duration::from_secs(20)).await.unwrap();
+        println!("{text}");
+        assert!(!is_error);
+        let (text, is_error) = conn.call_tool("click", &json!({ "id": "999.0" }), Duration::from_secs(20)).await.unwrap();
+        assert!(is_error && text.contains("gone"), "{text}");
+    }
 
     /// Needs network for npx: `cargo test -- --ignored real_filesystem_server`
     #[tokio::test]

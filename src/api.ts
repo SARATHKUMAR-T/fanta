@@ -195,6 +195,7 @@ export const api = {
   companionBubble: (visible: boolean) => invoke<void>("companion_bubble", { visible }),
   pluginsInfo: () => invoke<PluginInfo[]>("plugins_info"),
   appClis: () => invoke<AppCli[]>("app_clis"),
+  pluginAddDesktop: () => invoke<void>("plugin_add_desktop"),
   pluginsReload: () => invoke<void>("plugins_reload"),
   pluginAdd: (name: string, command: string, triggers: string) => invoke<void>("plugin_add", { name, command, triggers }),
   pluginRemove: (name: string) => invoke<void>("plugin_remove", { name }),
