@@ -11,6 +11,7 @@ mod persona;
 mod plugins;
 mod scheduler;
 mod stats;
+mod system;
 mod teams;
 mod tools;
 mod voice;
@@ -18,6 +19,7 @@ mod windows;
 
 use llm::{Message, Ollama};
 use persona::Persona;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -29,6 +31,8 @@ const HISTORY_LIMIT: usize = 20;
 /// Talk to Fanta from anywhere.
 const VOICE_SHORTCUT: &str = "ctrl+alt+space";
 const MAX_TOOL_ROUNDS: usize = 5;
+/// Cloud models can drive a browser or app, which takes many steps.
+const MAX_CLOUD_TOOL_ROUNDS: usize = 40;
 
 pub struct AppState {
     pub persona: Persona,
@@ -42,6 +46,8 @@ pub struct AppState {
     pub plugins: plugins::Host,
     pub voice: voice::Voice,
     pub teams: teams::Teams,
+    /// Set by the Stop button; the running chat turn checks it between steps.
+    pub chat_cancel: std::sync::atomic::AtomicBool,
 }
 
 #[tauri::command]
@@ -141,12 +147,20 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
     if calendar::provider(&app) != "graph" {
         schemas.retain(|t| !t["function"]["name"].as_str().unwrap_or("").starts_with("teams_"));
     }
+    // Shell and file writes need a model that can plan multi-step work.
+    if !cloud {
+        schemas.retain(|t| !matches!(t["function"]["name"].as_str(), Some("run_command" | "write_file")));
+    }
     // Cloud models handle many tools well; the small local model gets only the plugins mentioned.
     schemas.extend(if cloud { state.plugins.all_schemas() } else { state.plugins.schemas_for(&routing_context) });
-    let rounds = if cloud { MAX_TOOL_ROUNDS * 2 } else { MAX_TOOL_ROUNDS };
+    let rounds = if cloud { MAX_CLOUD_TOOL_ROUNDS } else { MAX_TOOL_ROUNDS };
+    state.chat_cancel.store(false, Ordering::SeqCst);
     // What tools did this turn, so a failure afterwards doesn't hide that they ran.
     let mut done: Vec<String> = vec![];
     for _ in 0..rounds {
+        if state.chat_cancel.load(Ordering::SeqCst) {
+            return Ok(stopped(&app, &state, &done));
+        }
         let reply = match brain::chat(&app, &messages, &schemas, |tok| {
             let _ = app.emit("chat://token", tok);
         })
@@ -179,10 +193,12 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         messages.push(reply);
         for call in calls {
             let (name, args) = (&call.function.name, &call.function.arguments);
-            let result = if cloud::invalid_args(args) {
+            let result = if state.chat_cancel.load(Ordering::SeqCst) {
+                "error: the user pressed Stop".to_string()
+            } else if cloud::invalid_args(args) {
                 "error: the tool arguments weren't valid JSON - try the call again".to_string()
             } else {
-                dispatch(&app, &state, name, args).await
+                dispatch(&app, &state, name, args, cloud).await
             };
             if !result.starts_with("error") && !result.starts_with("The user") {
                 done.push(result.lines().next().unwrap_or("").to_string());
@@ -194,6 +210,21 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
         }
     }
     Err("Too many tool rounds; stopping.".into())
+}
+
+/// Ends a turn the user stopped, keeping a record of what already ran.
+fn stopped(app: &AppHandle, state: &AppState, done: &[String]) -> String {
+    let content = if done.is_empty() { "Stopped.".to_string() } else { format!("Stopped. Done so far: {}", done.join(" ")) };
+    let _ = app.emit("chat://token", &content);
+    let _ = db::insert_message(&state.db.lock().unwrap(), "assistant", &content);
+    content
+}
+
+/// The Stop button: ends the running turn after the current step and declines any pending approval.
+#[tauri::command]
+fn chat_stop(app: AppHandle, state: State<'_, AppState>) {
+    state.chat_cancel.store(true, Ordering::SeqCst);
+    approvals::deny_all(&app);
 }
 
 /// The user asked to message someone on Teams, but Microsoft sign-in isn't set up.
@@ -226,7 +257,7 @@ fn teams_not_connected_request(app: &AppHandle, text: &str) -> bool {
 }
 
 /// Runs one tool call (built-in or plugin), asking the user first when required.
-async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_json::Value) -> String {
+async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_json::Value, cloud: bool) -> String {
     let is_plugin = state.plugins.is_plugin_tool(name);
     let approval = if is_plugin {
         state.plugins.approval_text(name, args).map(Ok)
@@ -245,7 +276,7 @@ async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_js
     }
     let _ = app.emit("chat://tool", name);
     if is_plugin {
-        state.plugins.call(name, args).await
+        state.plugins.call(name, args, plugins::result_limit(cloud)).await
     } else {
         state.tools.call(app, name, args).await
     }
@@ -558,6 +589,7 @@ pub fn run() {
         tools: tools::Registry::with_builtins(),
         calendar: calendar::Calendar::default(),
         approvals: approvals::Approvals::default(),
+        chat_cancel: Default::default(),
         plugins: plugins::Host::default(),
         voice: voice::Voice::default(),
         teams: teams::Teams::default(),
@@ -655,6 +687,7 @@ pub fn run() {
             mark_inbox_seen,
             set_notification_category,
             answer_approval,
+            chat_stop,
             calendar_status,
             calendar_sign_in,
             calendar_connect_ics,

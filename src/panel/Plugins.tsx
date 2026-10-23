@@ -8,6 +8,17 @@ const EXAMPLES = [
   { name: "github", command: "npx -y @modelcontextprotocol/server-github", triggers: "github, pr, issue, repo" },
 ];
 
+// Ready-made plugins that give Fanta hands on the computer. One click adds them.
+const PRESETS = [
+  {
+    name: "browser",
+    label: "Web browser",
+    hint: "Opens sites, reads pages, clicks and fills forms in its own Chromium window.",
+    command: "npx -y @playwright/mcp@0.0.83 --user-data-dir ~/.config/fanta/browser",
+    triggers: "web, browser, site, website, page, open, search, google, url, link",
+  },
+];
+
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [open, setOpen] = useState<string | null>(null);
@@ -59,6 +70,18 @@ export default function Plugins() {
       </p>
 
       {plugins.length === 0 && !adding && <p className="muted small empty-line">No plugins yet.</p>}
+
+      {PRESETS.filter((x) => !plugins.some((p) => p.name === x.name)).map((x) => (
+        <div key={x.name} className="preset">
+          <div className="plugin-main">
+            <div className="plugin-name">{x.label}</div>
+            <div className="muted tiny">{x.hint}</div>
+          </div>
+          <button className="btn soft" onClick={() => run(() => api.pluginAdd(x.name, x.command, x.triggers))}>
+            Add
+          </button>
+        </div>
+      ))}
 
       <ul className="plugin-list">
         {plugins.map((p) => (

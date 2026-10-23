@@ -180,6 +180,7 @@ export const api = {
   setNotificationCategory: (id: number, category: Category) =>
     invoke<void>("set_notification_category", { id, category }),
   answerApproval: (id: number, approved: boolean) => invoke<void>("answer_approval", { id, approved }),
+  chatStop: () => invoke<void>("chat_stop"),
   calendarStatus: () => invoke<CalendarStatus>("calendar_status"),
   calendarSignIn: (clientId: string, tenant: string) => invoke<DeviceCode>("calendar_sign_in", { clientId, tenant }),
   calendarConnectIcs: (url: string) => invoke<number>("calendar_connect_ics", { url }),

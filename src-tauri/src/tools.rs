@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::calendar::{self, graph::NewMeeting};
-use crate::{db, focus, AppState};
+use crate::{db, focus, system, AppState};
 
 type SyncHandler = fn(&AppHandle, &Value) -> anyhow::Result<String>;
 type AsyncHandler = fn(AppHandle, Value) -> BoxFuture<'static, anyhow::Result<String>>;
@@ -240,6 +240,73 @@ impl Registry {
                     |app, _| Ok(crate::stats::summary(&focus::analytics(app)?)),
                 ),
                 tool(
+                    "list_dir",
+                    "List a folder on the user's computer (inside their home folder).",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "e.g. '~/Downloads'. Default: home folder." },
+                            "show_hidden": { "type": "boolean" }
+                        }
+                    }),
+                    |_, args| system::list_dir(args),
+                ),
+                tool(
+                    "read_file",
+                    "Read a text file on the user's computer (inside their home folder).",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "e.g. '~/notes/todo.md'" },
+                            "max_chars": { "type": "integer", "description": "Default 20000" }
+                        },
+                        "required": ["path"]
+                    }),
+                    |_, args| system::read_file(args),
+                ),
+                async_tool(
+                    "write_file",
+                    "Create, overwrite, or append to a text file in the user's home folder. The user is asked to approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "content": { "type": "string" },
+                            "append": { "type": "boolean", "description": "Add to the end instead of replacing" }
+                        },
+                        "required": ["path", "content"]
+                    }),
+                    |_, args| Box::pin(async move { system::write_file(&args) }),
+                    Some(|_, args| system::describe_write(args)),
+                ),
+                async_tool(
+                    "run_command",
+                    "Run a bash command on the user's Linux computer and get its output (2 minute limit). Don't use it to start GUI apps; use open_app. The user sees the exact command and must approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "command": { "type": "string" },
+                            "cwd": { "type": "string", "description": "Folder to run in. Default: home folder." }
+                        },
+                        "required": ["command"]
+                    }),
+                    |_, args| Box::pin(async move { system::run_command(&args).await }),
+                    Some(|_, args| system::describe_command(args)),
+                ),
+                async_tool(
+                    "open_app",
+                    "Launch an installed desktop app by name (e.g. 'Firefox', 'Text Editor', 'LibreOffice Writer'), or open a URL or file with its default app. The user is asked to approve.",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "App name, URL, or file path" }
+                        },
+                        "required": ["name"]
+                    }),
+                    |_, args| Box::pin(async move { system::open_app(&args) }),
+                    Some(|_, args| system::describe_open(args)),
+                ),
+                tool(
                     "focus_status",
                     "Check whether a focus block or break is running, and how many blocks were done today.",
                     json!({ "type": "object", "properties": {} }),
@@ -281,11 +348,11 @@ impl Registry {
 
 // ---- argument helpers (small models are loose with types) ----
 
-fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+pub(crate) fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
 }
 
-fn arg_i64(args: &Value, key: &str) -> Option<i64> {
+pub(crate) fn arg_i64(args: &Value, key: &str) -> Option<i64> {
     match args.get(key)? {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
         Value::String(s) => s.trim().parse().ok(),

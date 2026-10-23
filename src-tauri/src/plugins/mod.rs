@@ -19,9 +19,15 @@ const INIT_TIMEOUT: Duration = Duration::from_secs(120);
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// Small models get confused by many tools; below this, plugin tools always load.
 const ALWAYS_LOAD_LIMIT: usize = 8;
-/// Tool output beyond this is cut so it fits the model's context.
+/// Tool output beyond this is cut so it fits the model's context. Cloud models
+/// get more room: a browser page snapshot alone is often 10k+ characters.
 const MAX_RESULT_CHARS: usize = 4000;
+const MAX_CLOUD_RESULT_CHARS: usize = 24000;
 const SEP: &str = "__";
+
+pub fn result_limit(cloud: bool) -> usize {
+    if cloud { MAX_CLOUD_RESULT_CHARS } else { MAX_RESULT_CHARS }
+}
 
 pub fn config_path() -> PathBuf {
     persona::config_dir().join("mcp.json")
@@ -342,6 +348,9 @@ impl Host {
         if t.read_only || p.config.auto_approve.contains(&t.name) {
             return None;
         }
+        if let Some(action) = describe_action(&t.name, args) {
+            return Some(format!("{} › {action}", p.name));
+        }
         let mut shown = serde_json::to_string(args).unwrap_or_default();
         if shown.chars().count() > 400 {
             shown = shown.chars().take(400).collect::<String>() + "…";
@@ -349,7 +358,7 @@ impl Host {
         Some(format!("Run {} › {} with {shown}", p.name, t.name))
     }
 
-    pub async fn call(&self, exposed: &str, args: &Value) -> String {
+    pub async fn call(&self, exposed: &str, args: &Value, max_chars: usize) -> String {
         let Some((p, t)) = self.resolve(exposed) else {
             return format!("error: unknown plugin tool '{exposed}'");
         };
@@ -360,8 +369,8 @@ impl Host {
         match conn.call_tool(&t.name, args, CALL_TIMEOUT).await {
             Ok((text, is_error)) => {
                 let mut text = if is_error { format!("error: {text}") } else { text };
-                if text.chars().count() > MAX_RESULT_CHARS {
-                    text = text.chars().take(MAX_RESULT_CHARS).collect::<String>() + "\n…(truncated)";
+                if text.chars().count() > max_chars {
+                    text = text.chars().take(max_chars).collect::<String>() + "\n…(truncated)";
                 }
                 if text.trim().is_empty() {
                     "(no output)".into()
@@ -372,6 +381,24 @@ impl Host {
             Err(e) => format!("error: {e}"),
         }
     }
+}
+
+/// Plain-language approval text for common browser/desktop actions, which
+/// describe their target in an `element` argument. `None` falls back to raw JSON.
+fn describe_action(tool: &str, args: &Value) -> Option<String> {
+    let s = |k: &str| args[k].as_str().map(str::trim).filter(|v| !v.is_empty());
+    let short = |v: &str| if v.chars().count() > 300 { v.chars().take(300).collect::<String>() + "…" } else { v.to_string() };
+    let action = tool.strip_prefix("browser_").unwrap_or(tool);
+    Some(match action {
+        "navigate" => format!("open {}", s("url")?),
+        "click" => format!("click “{}”", s("element")?),
+        "hover" => format!("hover over “{}”", s("element")?),
+        "type" | "set_text" => format!("type “{}” into “{}”", short(s("text")?), s("element").unwrap_or("the focused field")),
+        "press_key" | "press_keys" => format!("press {}", s("key").or(s("keys"))?),
+        "select_option" => format!("choose {} in “{}”", args["values"], s("element")?),
+        "fill_form" => format!("fill in a form: {}", short(&args["fields"].to_string())),
+        _ => return None,
+    })
 }
 
 // ---- config edits from the UI ----
@@ -459,6 +486,16 @@ pub fn remove(name: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn describes_browser_actions() {
+        assert_eq!(describe_action("browser_click", &json!({ "element": "Sign in button", "target": "e12" })).unwrap(), "click “Sign in button”");
+        assert_eq!(describe_action("browser_navigate", &json!({ "url": "https://example.com" })).unwrap(), "open https://example.com");
+        assert_eq!(describe_action("browser_type", &json!({ "text": "hi" })).unwrap(), "type “hi” into “the focused field”");
+        // Missing the describing argument: fall back to raw JSON.
+        assert!(describe_action("browser_click", &json!({ "target": "e12" })).is_none());
+        assert!(describe_action("create_issue", &json!({})).is_none());
+    }
 
     #[test]
     fn exposed_names_are_valid() {

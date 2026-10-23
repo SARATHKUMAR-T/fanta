@@ -44,3 +44,10 @@ pub fn answer(app: &AppHandle, id: u64, approved: bool) {
         let _ = tx.send(approved);
     }
 }
+
+/// Declines every pending request (the user pressed Stop).
+pub fn deny_all(app: &AppHandle) {
+    for (_, tx) in app.state::<AppState>().approvals.pending.lock().unwrap().drain() {
+        let _ = tx.send(false);
+    }
+}

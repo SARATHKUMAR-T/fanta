@@ -3,7 +3,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { api, ApprovalRequest, ReplyTarget } from "../api";
 import Character from "../companion/Character";
 import { UI_EVENTS } from "../companion/useMood";
-import { MicIcon, SendIcon, ShieldIcon } from "../ui/Icons";
+import { MicIcon, SendIcon, ShieldIcon, StopIcon } from "../ui/Icons";
 
 type VoiceState = "idle" | "listening" | "transcribing";
 
@@ -373,8 +373,12 @@ export default function Chat({ name }: { name: string }) {
         />
         )}
         {voiceNote && <div className="voice-note">{voiceNote}</div>}
-        {draft.trim() ? (
-          <button className="send" disabled={busy} aria-label="Send">
+        {busy ? (
+          <button type="button" className="send stop" onClick={() => { api.chatStop(); if (speaking) api.voiceStop(); }} title="Stop" aria-label="Stop">
+            <StopIcon size={18} />
+          </button>
+        ) : draft.trim() ? (
+          <button className="send" aria-label="Send">
             <SendIcon size={18} />
           </button>
         ) : (
