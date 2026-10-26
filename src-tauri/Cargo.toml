@@ -3,6 +3,8 @@ name = "fanta"
 version = "0.1.0"
 description = "Fanta - a local AI companion"
 authors = ["Sarath Kumar"]
+license = "MIT"
+repository = "https://github.com/SARATHKUMAR-T/fanta"
 edition = "2021"
 
 [lib]
@@ -42,3 +44,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # Speech recognition is unusably slow unoptimized; build it optimized even in dev.
 [profile.dev.package.whisper-rs-sys]
 opt-level = 3
+
+# Smaller, faster release binaries.
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

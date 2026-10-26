@@ -12,18 +12,65 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "frame-src": "'none'"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "deb",
+      "appimage",
+      "rpm"
+    ],
+    "publisher": "Sarath Kumar",
+    "copyright": "Copyright (c) 2026 Sarath Kumar",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "homepage": "https://github.com/SARATHKUMAR-T/fanta",
+    "category": "Productivity",
+    "shortDescription": "A local AI companion for the Linux desktop",
+    "longDescription": "Fanta is a floating desktop companion that keeps your tasks, reminders and calendar, filters notifications, runs Pomodoro focus sessions and can operate other apps for you, with your approval for every action. It runs offline on Ollama by default.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "depends": [
+          "alsa-utils"
+        ],
+        "recommends": [
+          "python3-gi",
+          "gir1.2-atspi-2.0"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "libayatana-appindicator-gtk3",
+          "alsa-utils"
+        ],
+        "recommends": [
+          "python3-gobject",
+          "at-spi2-core"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }

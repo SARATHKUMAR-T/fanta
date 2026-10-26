@@ -1,0 +1,96 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the Linux packages and open a draft release.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build (e.g. v0.1.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux packages
+    # The oldest supported runner, so the binaries run on older glibc too.
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the tag matches the app version
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cargo_version=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          npm_version=$(node -p "require('./package.json').version")
+          echo "tag=$TAG tauri=$version cargo=$cargo_version npm=$npm_version"
+          [ "$TAG" = "v$version" ] && [ "$version" = "$cargo_version" ] && [ "$version" = "$npm_version" ] || {
+            echo "::error::Tag $TAG doesn't match the versions in tauri.conf.json, Cargo.toml and package.json"
+            exit 1
+          }
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libdbus-1-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev patchelf file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Fetch build tools
+        run: ./scripts/setup-voice-tools.sh
+
+      - name: Test before packaging
+        run: |
+          npm test
+          npm run build
+          (cd src-tauri && cargo test --locked)
+
+      - name: Build and upload packages
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ env.TAG }}
+          releaseName: Fanta ${{ env.TAG }}
+          releaseDraft: true
+          prerelease: ${{ contains(env.TAG, '-') }}
+          args: --bundles deb,appimage,rpm
+          releaseBody: |
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ env.TAG }}/CHANGELOG.md) for what's new.
+
+            ### Install
+            - **Ubuntu / Debian**: `sudo apt install ./Fanta_*_amd64.deb`
+            - **Fedora / openSUSE**: `sudo dnf install ./Fanta-*.x86_64.rpm`
+            - **Any distro**: `chmod +x Fanta_*_amd64.AppImage && ./Fanta_*_amd64.AppImage`
+
+            Fanta runs on [Ollama](https://ollama.com) by default: `ollama pull qwen3:4b-instruct`.
+            Verify downloads with `sha256sum -c SHA256SUMS`.
+
+      - name: Upload checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd src-tauri/target/release/bundle
+          find deb appimage rpm -maxdepth 1 -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+            -exec sha256sum {} + | sed 's|  [a-z]*/|  |' > SHA256SUMS
+          cat SHA256SUMS
+          # The release is still a draft, so address it by id rather than by tag.
+          curl -fsSL -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: text/plain" \
+            --data-binary @SHA256SUMS \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ steps.tauri.outputs.releaseId }}/assets?name=SHA256SUMS" > /dev/null

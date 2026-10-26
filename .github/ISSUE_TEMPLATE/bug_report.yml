@@ -1,0 +1,53 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the panel
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Fanta version
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options: [".deb", ".rpm", ".AppImage", "Built from source"]
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      placeholder: Ubuntu 24.04, GNOME 46 on Wayland
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model provider
+      options: [Ollama, Claude, OpenAI, Gemini, Not relevant]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Run `fanta` (or the AppImage) from a terminal and paste the output around the problem. Remove anything private first.
+      render: text

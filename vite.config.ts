@@ -12,6 +12,8 @@ export default defineConfig(async () => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
+  // Loaded from disk, not the network; the big chunks are Mermaid's, fetched only when a diagram is drawn.
+  build: { chunkSizeWarningLimit: 800 },
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
