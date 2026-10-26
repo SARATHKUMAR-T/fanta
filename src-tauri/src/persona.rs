@@ -40,6 +40,8 @@ notifications:
   keep_days: 14
   # Speech bubbles for incoming messages: messages (chat + urgent), urgent, or off.
   bubbles: messages
+  # Chats or channels Fanta waves at you for, with the earlier messages for context.
+  watch: []
 
 system_prompt: |
   You are Fanta, a calm, grounded productivity coach who lives on the user's
@@ -90,6 +92,9 @@ pub struct NotificationConfig {
     /// Which messages Fanta reads out in a speech bubble: "messages" (chat
     /// messages and anything urgent), "urgent", or "off".
     pub bubbles: String,
+    /// Chats or channels ("webapp-team") Fanta waves at you for, showing the
+    /// earlier messages in that chat as context.
+    pub watch: Vec<String>,
 }
 
 impl Default for NotificationConfig {
@@ -97,12 +102,23 @@ impl Default for NotificationConfig {
         Self {
             enabled: true,
             vip: vec![],
-            urgent_keywords: ["urgent", "asap", "outage", "incident", "emergency", "blocker", "p1", "sev1", "prod down"]
-                .map(String::from)
-                .to_vec(),
+            urgent_keywords: [
+                "urgent",
+                "asap",
+                "outage",
+                "incident",
+                "emergency",
+                "blocker",
+                "p1",
+                "sev1",
+                "prod down",
+            ]
+            .map(String::from)
+            .to_vec(),
             muted_apps: vec![],
             keep_days: 14,
             bubbles: "messages".into(),
+            watch: vec![],
         }
     }
 }
@@ -159,9 +175,7 @@ impl Persona {
     pub fn in_workday(&self, now: chrono::DateTime<chrono::Local>) -> bool {
         let day = now.format("%a").to_string().to_lowercase();
         let hm = now.format("%H:%M").to_string();
-        self.workday.days.iter().any(|d| d.to_lowercase() == day)
-            && hm >= self.workday.start
-            && hm < self.workday.end
+        self.workday.days.iter().any(|d| d.to_lowercase() == day) && hm >= self.workday.start && hm < self.workday.end
     }
 
     pub fn full_system_prompt(&self) -> String {

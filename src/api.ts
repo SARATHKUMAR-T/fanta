@@ -99,6 +99,14 @@ export type InboxItem = {
   received_at: string;
 };
 
+/** A message the moment it's captured, before triage (`category` may still be "pending"). */
+export type Incoming = InboxItem & {
+  /** The `notifications.watch` entry it matched, e.g. "webapp-team". */
+  watched: string | null;
+  /** Earlier messages in the same chat, oldest first. */
+  context: InboxItem[];
+};
+
 export type CalEvent = {
   num: number;
   subject: string;
@@ -157,6 +165,31 @@ export type VoiceStatus = {
   download_mb: number;
 };
 
+export type Level = "kid" | "beginner" | "intermediate";
+
+/** A diagram as nodes and edges; the Teacher view draws it with Mermaid. */
+export type DiagramSpec = {
+  kind: "flow" | "sequence" | "tree" | "cycle";
+  nodes: { id: string; label: string }[];
+  edges: { from: string; to: string; label: string }[];
+};
+
+export type Lesson = {
+  id: number;
+  topic: string;
+  level: Level;
+  title: string;
+  summary: string;
+  analogy: string;
+  overview: DiagramSpec;
+  steps: { title: string; explain: string; example: string; key_point: string; diagram: DiagramSpec }[];
+  terms: { term: string; meaning: string }[];
+  quiz: { question: string; options: string[]; answer: number; why: string }[];
+};
+
+export type LessonInfo = { id: number; topic: string; title: string; level: Level; created_at: string };
+export type LessonAnswer = { question: string; answer: string; diagram: DiagramSpec };
+
 export const api = {
   persona: () => invoke<Persona>("get_persona"),
   history: () => invoke<{ role: string; content: string }[]>("get_history"),
@@ -192,6 +225,9 @@ export const api = {
   openLink: (url: string) => invoke<void>("open_link", { url }),
   togglePanel: () => invoke<void>("toggle_panel"),
   hidePanel: () => invoke<void>("hide_panel"),
+  expandPanel: (expanded: boolean) => invoke<void>("expand_panel", { expanded }),
+  panelExpanded: () => invoke<boolean>("panel_expanded"),
+  minimizePanel: () => invoke<void>("minimize_panel"),
   companionBubble: (visible: boolean) => invoke<void>("companion_bubble", { visible }),
   pluginsInfo: () => invoke<PluginInfo[]>("plugins_info"),
   appClis: () => invoke<AppCli[]>("app_clis"),
@@ -220,6 +256,11 @@ export const api = {
   voiceStop: () => invoke<void>("voice_stop"),
   voiceSetMode: (mode: VoiceStatus["speak_mode"]) => invoke<void>("voice_set_mode", { mode }),
   voiceShouldSpeak: (byVoice: boolean) => invoke<boolean>("voice_should_speak", { byVoice }),
+  teachLesson: (topic: string, level: Level) => invoke<Lesson>("teach_lesson", { topic, level }),
+  teachAsk: (lessonId: number, question: string) => invoke<LessonAnswer>("teach_ask", { lessonId, question }),
+  teachGet: (id: number) => invoke<Lesson>("teach_get", { id }),
+  teachRecent: () => invoke<LessonInfo[]>("teach_recent"),
+  teachDelete: (id: number) => invoke<void>("teach_delete", { id }),
 };
 
 /** Local "YYYY-MM-DD HH:MM:SS" for a Date, matching the backend. */

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, FocusStats, hm, parseTs, PomodoroConfig, Task } from "../api";
 import { PauseIcon, PlayIcon, SkipIcon, StopIcon } from "../ui/Icons";
+import { Select } from "../ui/Select";
 import { mmss, startFocus, useFocusStatus } from "./focus";
 
 const KIND_LABEL = { focus: "Focus", short_break: "Short break", long_break: "Long break" } as const;
@@ -262,14 +263,12 @@ export default function FocusView({ visible }: { visible: boolean }) {
           </div>
         ) : (
           <>
-            <select className="task-pick" value={taskId ?? ""} onChange={(e) => setTaskId(e.target.value ? Number(e.target.value) : undefined)}>
-              <option value="">No task - just focus</option>
-              {tasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
+            <Select
+              className="task-pick"
+              value={taskId ?? 0}
+              onChange={(v) => setTaskId(v || undefined)}
+              options={[{ value: 0, label: "No task - just focus", icon: "🎯" }, ...tasks.map((t) => ({ value: t.id, label: t.title, icon: "📝" }))]}
+            />
             <div className="timer-controls">
               <button className="btn primary big-start" onClick={() => startFocus(undefined, taskId)}>
                 <PlayIcon size={16} /> Start pomodoro

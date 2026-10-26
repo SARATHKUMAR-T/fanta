@@ -106,7 +106,9 @@ impl Connection {
                         let reply = match method {
                             "ping" => json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
                             "roots/list" => json!({ "jsonrpc": "2.0", "id": id, "result": { "roots": [] } }),
-                            _ => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "not supported by Fanta" } }),
+                            _ => {
+                                json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "not supported by Fanta" } })
+                            }
                         };
                         if let Some(c) = reader_conn.upgrade() {
                             let _ = c.write(&reply).await;
@@ -201,6 +203,7 @@ impl Connection {
     }
 
     /// Calls a tool and flattens its content to text for the model.
+    #[cfg(test)]
     pub async fn call_tool(&self, name: &str, args: &Value, timeout: Duration) -> anyhow::Result<(String, bool)> {
         let result = self.call_tool_raw(name, args, timeout).await?;
         Ok((content_to_text(&result), result["isError"].as_bool().unwrap_or(false)))
@@ -238,7 +241,9 @@ pub fn content_images(result: &Value) -> Vec<crate::llm::Image> {
         .into_iter()
         .flatten()
         .filter(|c| c["type"] == "image")
-        .filter_map(|c| Some(crate::llm::Image { mime: c["mimeType"].as_str()?.to_string(), data: c["data"].as_str()?.to_string() }))
+        .filter_map(|c| {
+            Some(crate::llm::Image { mime: c["mimeType"].as_str()?.to_string(), data: c["data"].as_str()?.to_string() })
+        })
         .collect()
 }
 
@@ -342,14 +347,17 @@ mod real_server_tests {
     #[ignore]
     async fn desktop_server() {
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/desktop_mcp.py");
-        let conn = Connection::start("python3", &[script.into()], &HashMap::new(), Duration::from_secs(10), |_| {}).await.unwrap();
+        let conn = Connection::start("python3", &[script.into()], &HashMap::new(), Duration::from_secs(10), |_| {})
+            .await
+            .unwrap();
         let tools = conn.list_tools().await.unwrap();
         let read_only: Vec<&str> = tools.iter().filter(|t| t.read_only).map(|t| t.name.as_str()).collect();
         assert_eq!(read_only, ["list_windows", "window_tree", "find", "read_text", "screenshot"]);
         let (text, is_error) = conn.call_tool("list_windows", &json!({}), Duration::from_secs(20)).await.unwrap();
         println!("{text}");
         assert!(!is_error);
-        let (text, is_error) = conn.call_tool("click", &json!({ "id": "999.0" }), Duration::from_secs(20)).await.unwrap();
+        let (text, is_error) =
+            conn.call_tool("click", &json!({ "id": "999.0" }), Duration::from_secs(20)).await.unwrap();
         assert!(is_error && text.contains("gone"), "{text}");
     }
 
@@ -360,7 +368,8 @@ mod real_server_tests {
         let dir = std::env::temp_dir().join("fanta-mcp-test");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("notes.txt"), "standup at 10").unwrap();
-        let args = vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), dir.to_string_lossy().to_string()];
+        let args =
+            vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), dir.to_string_lossy().to_string()];
         let conn = Connection::start("npx", &args, &HashMap::new(), Duration::from_secs(180), |_| {}).await.unwrap();
         let tools = conn.list_tools().await.unwrap();
         println!("server: {}", conn.server_name.lock().unwrap());

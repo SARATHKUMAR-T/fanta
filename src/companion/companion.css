@@ -13,7 +13,7 @@
 .buddy {
   position: relative;
   cursor: grab;
-  filter: drop-shadow(0 6px 10px rgba(120, 58, 18, 0.28));
+  filter: drop-shadow(0 6px 10px oklch(28.3% 0.141 291.089 / 0.32));
   transition: transform 0.18s ease;
 }
 .buddy:hover { transform: translateY(-3px) scale(1.03); }
@@ -28,7 +28,7 @@
   height: 120px;
   transform: translateX(-50%);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 176, 84, 0.45), rgba(255, 176, 84, 0) 70%);
+  background: radial-gradient(circle, oklch(70.2% 0.183 293.541 / 0.5), oklch(70.2% 0.183 293.541 / 0) 70%);
   opacity: 0;
   transition: opacity 0.25s;
   pointer-events: none;
@@ -43,14 +43,14 @@
   height: 22px;
   padding: 0 6px;
   border-radius: 11px;
-  background: linear-gradient(135deg, #ff6a3d, #ff3d5a);
+  background: linear-gradient(135deg, oklch(65% 0.24 15), oklch(58% 0.25 350));
   color: #fff;
   font-weight: 800;
   font-size: 12px;
   display: grid;
   place-items: center;
   border: 2px solid #fff;
-  box-shadow: 0 2px 6px rgba(200, 40, 40, 0.35);
+  box-shadow: 0 2px 6px oklch(50% 0.2 15 / 0.4);
   animation: badge-pop 0.35s ease-out;
 }
 
@@ -61,7 +61,7 @@
   transform: translateX(-50%);
   padding: 3px 10px;
   border-radius: 12px;
-  background: rgba(43, 33, 28, 0.86);
+  background: oklch(28.3% 0.141 291.089 / 0.92);
   color: #fff;
   font-weight: 800;
   font-size: 12.5px;
@@ -69,7 +69,7 @@
   white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
-.timer.break { background: rgba(59, 154, 111, 0.92); }
+.timer.break { background: oklch(60% 0.13 160 / 0.94); }
 
 .hint {
   position: absolute;
@@ -78,32 +78,32 @@
   padding: 3px 9px;
   border-radius: 10px;
   background: #fff;
-  color: #c4471a;
+  color: oklch(43.2% 0.232 292.759);
   font-weight: 800;
   font-size: 12px;
-  box-shadow: 0 2px 8px rgba(120, 58, 18, 0.2);
+  box-shadow: 0 2px 8px oklch(28.3% 0.141 291.089 / 0.22);
   animation: hint-bob 1.4s ease-in-out infinite;
   pointer-events: none;
 }
 
 .speech {
   position: relative;
-  max-width: 270px;
+  max-width: 290px;
   margin: 0 10px 2px;
   padding: 11px 26px 11px 14px;
   border-radius: 18px;
   background: #fff;
-  color: #2b211c;
+  color: oklch(28.3% 0.141 291.089);
   font-family: "Nunito Variable", system-ui, sans-serif;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
-  box-shadow: 0 8px 24px rgba(120, 58, 18, 0.22);
+  box-shadow: 0 10px 28px oklch(28.3% 0.141 291.089 / 0.26);
   cursor: pointer;
   animation: bubble-in 0.28s cubic-bezier(0.2, 1.4, 0.4, 1);
 }
-.speech-title { font-weight: 800; font-size: 14px; color: #2b211c; }
-.speech-meta { font-size: 11.5px; font-weight: 700; color: #a2897a; margin-top: 1px; }
+.speech-title { font-weight: 800; font-size: 14px; color: oklch(28.3% 0.141 291.089); }
+.speech-meta { font-size: 11.5px; font-weight: 700; color: oklch(56% 0.08 292); margin-top: 1px; }
 .speech-text {
   margin-top: 3px;
   display: -webkit-box;
@@ -113,8 +113,8 @@
   overflow-wrap: anywhere;
 }
 .speech-title + .speech-text { font-weight: 600; }
-.speech-more { margin-top: 5px; font-size: 11.5px; font-weight: 800; color: #c4471a; }
-.speech.message { box-shadow: 0 8px 24px rgba(120, 58, 18, 0.22), inset 0 0 0 2px #ffcf9e; }
+.speech-more { margin-top: 5px; font-size: 11.5px; font-weight: 800; color: oklch(43.2% 0.232 292.759); }
+.speech.message { box-shadow: 0 10px 28px oklch(28.3% 0.141 291.089 / 0.26), inset 0 0 0 2px oklch(81.1% 0.111 293.571); }
 .speech::after {
   content: "";
   position: absolute;
@@ -126,7 +126,7 @@
   transform: translateX(-50%) rotate(45deg);
   border-radius: 3px;
 }
-.speech.alert { box-shadow: 0 8px 24px rgba(220, 79, 58, 0.3), inset 0 0 0 2px #ff7a3d; }
+.speech.alert { box-shadow: 0 10px 28px oklch(55% 0.2 27 / 0.32), inset 0 0 0 2px oklch(64% 0.21 27); animation: bubble-in 0.28s cubic-bezier(0.2, 1.4, 0.4, 1), alert-nudge 0.5s ease-in-out 0.3s 2; }
 .speech-close {
   position: absolute;
   top: 4px;
@@ -136,13 +136,46 @@
   border: 0;
   border-radius: 50%;
   background: none;
-  color: #8b7b71;
+  color: oklch(56% 0.08 292);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
-.speech-close:hover { background: #fff1e6; }
+.speech-close:hover { background: oklch(95.6% 0.022 294); }
 
+/* A watched chat: the bubble arrives in the theme colour, with the earlier messages above. */
+.speech.team {
+  background: linear-gradient(160deg, oklch(38% 0.189 293.745), oklch(28.3% 0.141 291.089));
+  color: oklch(96.5% 0.014 294);
+  box-shadow: 0 12px 30px oklch(28.3% 0.141 291.089 / 0.45), inset 0 0 0 1.5px oklch(70.2% 0.183 293.541 / 0.55);
+}
+.speech.team::after { background: oklch(28.3% 0.141 291.089); }
+.speech.team .speech-title { color: #fff; }
+.speech.team .speech-meta { color: oklch(81.1% 0.111 293.571); }
+.speech.team .speech-close { color: oklch(81.1% 0.111 293.571); }
+.speech.team .speech-close:hover { background: oklch(100% 0 0 / 0.12); }
+.speech.team .speech-btn { background: oklch(100% 0 0 / 0.14); color: #fff; }
+.speech.team .speech-btn.primary { background: #fff; color: oklch(28.3% 0.141 291.089); }
+.speech.team .thread-line { color: oklch(85% 0.06 293); border-left-color: oklch(70.2% 0.183 293.541 / 0.6); }
+.speech.team .thread-line b { color: oklch(90% 0.05 293); }
+
+.speech-thread { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.thread-line {
+  padding-left: 8px;
+  border-left: 2px solid oklch(89.4% 0.057 293.283);
+  color: oklch(52% 0.06 292);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-line b { font-weight: 800; color: oklch(43% 0.1 292); }
+.speech-thread + .speech-text { margin-top: 5px; }
+.speech-sender { font-weight: 800; }
+
+@keyframes alert-nudge { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-1.5deg); } 75% { transform: rotate(1.5deg); } }
 @keyframes bubble-in { from { opacity: 0; transform: translateY(8px) scale(0.92); } to { opacity: 1; transform: none; } }
 @keyframes badge-pop { from { transform: scale(0.4); } to { transform: scale(1); } }
 @keyframes hint-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
@@ -162,7 +195,7 @@
   box-shadow: 0 0 0 0 rgba(232, 69, 60, 0.5);
   animation: mic-ring 1.2s ease-out infinite;
 }
-.mic-badge.transcribing { background: #ffb054; animation: none; }
+.mic-badge.transcribing { background: oklch(70.2% 0.183 293.541); animation: none; }
 @keyframes mic-ring { 0% { box-shadow: 0 0 0 0 rgba(232, 69, 60, 0.55); } 100% { box-shadow: 0 0 0 12px rgba(232, 69, 60, 0); } }
 
 .speech-actions { display: flex; gap: 6px; margin-top: 8px; }
@@ -171,12 +204,12 @@
   padding: 0 12px;
   border: 0;
   border-radius: 9px;
-  background: #fff1e6;
-  color: #2b211c;
+  background: oklch(95.6% 0.022 294);
+  color: oklch(28.3% 0.141 291.089);
   font: inherit;
   font-size: 12.5px;
   font-weight: 800;
   cursor: pointer;
 }
-.speech-btn.primary { background: linear-gradient(135deg, #ffb054, #ff7a3d); color: #fff; }
+.speech-btn.primary { background: linear-gradient(135deg, oklch(54.1% 0.281 293.009), oklch(28.3% 0.141 291.089)); color: #fff; }
 .speech-btn:active { transform: scale(0.97); }

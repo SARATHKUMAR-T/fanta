@@ -109,3 +109,30 @@ export const TomatoIcon = (p: P) => (
     <path d="M12 6V3.5M8.5 6.5 12 8l3.5-1.5" />
   </Svg>
 );
+export const TeachIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="m2.5 9 9.5-4.5L21.5 9 12 13.5Z" />
+    <path d="M6.5 11v4.5c0 1.4 2.5 3 5.5 3s5.5-1.6 5.5-3V11" />
+    <path d="M21.5 9v5" />
+  </Svg>
+);
+export const MinimizeIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 17h12" />
+  </Svg>
+);
+export const MaximizeIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M15 4h5v5M9 20H4v-5M20 4l-6 6M4 20l6-6" />
+  </Svg>
+);
+export const RestoreIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 4l-6 6M14 5v5h5M4 20l6-6M10 19v-5H5" />
+  </Svg>
+);
+export const ExpandIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5" />
+  </Svg>
+);

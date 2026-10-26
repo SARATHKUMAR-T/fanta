@@ -38,7 +38,13 @@ pub fn spawn(app: AppHandle) {
         while let Some(id) = rx.recv().await {
             if let Err(e) = triage(&worker_app, id).await {
                 eprintln!("triage {id}: {e}");
-                let _ = db::set_triage(&worker_app.state::<AppState>().db.lock().unwrap(), id, "fyi", None, Some("triage failed"));
+                let _ = db::set_triage(
+                    &worker_app.state::<AppState>().db.lock().unwrap(),
+                    id,
+                    "fyi",
+                    None,
+                    Some("triage failed"),
+                );
                 let _ = worker_app.emit("inbox://changed", ());
             }
         }
@@ -88,10 +94,8 @@ async fn monitor(app: &AppHandle) -> anyhow::Result<()> {
         }
         recent.push_back((now, key));
 
-        let desktop_entry = hints
-            .get("desktop-entry")
-            .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
-            .unwrap_or_default();
+        let desktop_entry =
+            hints.get("desktop-entry").and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
         if let Err(e) = capture(app, &app_name, &desktop_entry, &title, &body) {
             eprintln!("capture: {e}");
         }
@@ -112,26 +116,54 @@ fn capture(app: &AppHandle, app_name: &str, desktop_entry: &str, title: &str, bo
         return Ok(());
     }
 
-    let id = {
+    let (incoming, triaged) = {
         let conn = state.db.lock().unwrap();
         let during_focus = db::active_session(&conn)?.is_some_and(|s| s.kind == "focus");
         let parsed = parse_message(&source, &title, &body);
         let id = db::insert_notification(&conn, app_name, &source, &title, &body, &parsed, during_focus)?;
         let who = parsed.sender.clone().unwrap_or_else(|| title.clone());
-        if let Some((category, reason)) = rule_triage(cfg, app_name, &source, &who, &parsed.text) {
-            db::set_triage(&conn, id, category, None, Some(&reason))?;
-            drop(conn);
-            let _ = app.emit("inbox://changed", ());
-            after_triage(app, id)?;
-            return Ok(());
+        let rule = rule_triage(cfg, app_name, &source, &who, &parsed.text);
+        if let Some((category, reason)) = &rule {
+            db::set_triage(&conn, id, category, None, Some(reason))?;
         }
-        id
+        let n = db::get_notification(&conn, id)?.ok_or_else(|| anyhow::anyhow!("notification {id} vanished"))?;
+        let context = db::earlier_in_chat(&conn, &n, 3)?;
+        let watched = watched_chat(&cfg.watch, &n);
+        (Incoming { notification: n, watched, context }, rule.is_some())
     };
+    let id = incoming.notification.id;
+    // Straight to the companion, before the (slow) model triage, so she can react at once.
+    let _ = app.emit("inbox://new", &incoming);
     let _ = app.emit("inbox://changed", ());
-    if let Some(q) = QUEUE.get() {
+    if triaged {
+        after_triage(app, id)?;
+    } else if let Some(q) = QUEUE.get() {
         let _ = q.send(id);
     }
     Ok(())
+}
+
+/// A message as soon as it arrives, for the companion's instant bubble.
+#[derive(serde::Serialize)]
+struct Incoming {
+    #[serde(flatten)]
+    notification: db::Notification,
+    /// Named (or posted to) a chat in `notifications.watch`: `Some(that name)`.
+    watched: Option<String>,
+    /// Earlier messages in the same chat, oldest first.
+    context: Vec<db::Notification>,
+}
+
+/// Letters and digits only, so "webapp-team", "WebApp Team" and "webapp_team" all match.
+fn squash(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// Which watched chat (if any) a message belongs to. Teams puts a channel or chat
+/// name in the title ("Akilesh posted in webapp-team") or as the group chat label.
+fn watched_chat(watch: &[String], n: &db::Notification) -> Option<String> {
+    let hay = squash(&format!("{} {} {}", n.title, n.chat.as_deref().unwrap_or(""), n.body));
+    watch.iter().find(|w| !squash(w).is_empty() && hay.contains(&squash(w))).cloned()
 }
 
 /// Removes HTML that some apps (and Chrome) put in notification bodies.
@@ -192,7 +224,14 @@ pub fn parse_message(source: &str, title: &str, body: &str) -> db::ParsedMessage
     // "Akilesh Murali @mentioned you" -> sender "Akilesh Murali", the action kept with the text.
     let mut sender = title.to_string();
     let mut action = None;
-    for suffix in [" @mentioned you", " mentioned you", " reacted to your message", " replied to your message", " replied to a message", " liked your message"] {
+    for suffix in [
+        " @mentioned you",
+        " mentioned you",
+        " reacted to your message",
+        " replied to your message",
+        " replied to a message",
+        " liked your message",
+    ] {
         if let Some(name) = title.strip_suffix(suffix) {
             sender = name.trim().to_string();
             action = Some(suffix.trim().trim_start_matches('@'));
@@ -229,15 +268,15 @@ fn detect_source(app_name: &str, desktop_entry: &str, title: &str, body: &str) -
             return name.into();
         }
     }
-    if app_name.is_empty() { "Unknown".into() } else { app_name.into() }
+    if app_name.is_empty() {
+        "Unknown".into()
+    } else {
+        app_name.into()
+    }
 }
 
 fn words(s: &str) -> Vec<String> {
-    s.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(String::from)
-        .collect()
+    s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(String::from).collect()
 }
 
 /// Matches a keyword or phrase on word boundaries ("down" won't match "download").
@@ -247,10 +286,24 @@ fn contains_phrase(text_words: &[String], phrase: &str) -> bool {
 }
 
 /// Cheap, predictable rules that run before the model.
-fn rule_triage(cfg: &NotificationConfig, app_name: &str, source: &str, title: &str, body: &str) -> Option<(&'static str, String)> {
+fn rule_triage(
+    cfg: &NotificationConfig,
+    app_name: &str,
+    source: &str,
+    title: &str,
+    body: &str,
+) -> Option<(&'static str, String)> {
     let muted = |name: &str| cfg.muted_apps.iter().any(|m| m.eq_ignore_ascii_case(name));
     if muted(app_name) || muted(source) {
         return Some(("ignore", "muted app".into()));
+    }
+    // Reactions and typing indicators: nothing to read, and the model is slow to say so.
+    let lower = body.to_lowercase();
+    if lower.starts_with("(reacted to your message)")
+        || lower.starts_with("(liked your message)")
+        || lower.ends_with(" is typing")
+    {
+        return Some(("ignore", "reaction".into()));
     }
     let title_words = words(title);
     if let Some(v) = cfg.vip.iter().find(|v| contains_phrase(&title_words, v)) {
@@ -305,10 +358,7 @@ async fn triage(app: &AppHandle, id: i64) -> anyhow::Result<()> {
         ),
     ];
     let out: Value = state.ollama.complete_json(&state.persona.model, &messages, &schema).await?;
-    let category = match out["category"].as_str() {
-        Some(c @ ("urgent" | "fyi" | "ignore")) => c,
-        _ => "fyi",
-    };
+    let category = out["category"].as_str().unwrap_or("fyi");
     db::set_triage(&state.db.lock().unwrap(), id, category, out["summary"].as_str(), out["reason"].as_str())?;
     let _ = app.emit("inbox://changed", ());
     after_triage(app, id)
@@ -353,12 +403,7 @@ async fn digest(app: &AppHandle, since: &str) -> anyhow::Result<()> {
     if items.is_empty() {
         return Ok(());
     }
-    let list = items
-        .iter()
-        .rev()
-        .map(|n| format!("- [{}] {}", n.category, describe(n)))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let list = items.iter().rev().map(|n| format!("- [{}] {}", n.category, describe(n))).collect::<Vec<_>>().join("\n");
     let message = scheduler::speak(
         app,
         &format!("Messages that arrived during the focus block:\n{list}"),
@@ -384,7 +429,11 @@ mod tests {
 
     #[test]
     fn parses_teams_group_message() {
-        let m = parse_message("Teams", "Aarthi Selvakumari, +3", "teams.cloud.microsoft\n\nAkilesh: customer grievance agent?");
+        let m = parse_message(
+            "Teams",
+            "Aarthi Selvakumari, +3",
+            "teams.cloud.microsoft\n\nAkilesh: customer grievance agent?",
+        );
         assert_eq!(m.sender.as_deref(), Some("Akilesh"));
         assert_eq!(m.chat.as_deref(), Some("Aarthi Selvakumari, +3"));
         assert_eq!(m.text, "customer grievance agent?");
@@ -392,7 +441,11 @@ mod tests {
         let dm = parse_message("Teams", "Ravi Kumar", "teams.microsoft.com\n\nare you free at 3?");
         assert_eq!((dm.sender.as_deref(), dm.chat, dm.text.as_str()), (Some("Ravi Kumar"), None, "are you free at 3?"));
 
-        let mention = parse_message("Teams", "Akilesh Murali @mentioned you", "teams.cloud.microsoft\n\nSarathkumar come on lets finish");
+        let mention = parse_message(
+            "Teams",
+            "Akilesh Murali @mentioned you",
+            "teams.cloud.microsoft\n\nSarathkumar come on lets finish",
+        );
         assert_eq!(mention.sender.as_deref(), Some("Akilesh Murali"));
         assert_eq!(mention.text, "(mentioned you) Sarathkumar come on lets finish");
 
@@ -410,18 +463,53 @@ mod tests {
 
     #[test]
     fn detects_teams_in_browser() {
-        assert_eq!(detect_source("Google Chrome", "google-chrome", "Alice Smith", "teams.microsoft.com\n\nping"), "Teams");
+        assert_eq!(
+            detect_source("Google Chrome", "google-chrome", "Alice Smith", "teams.microsoft.com\n\nping"),
+            "Teams"
+        );
         assert_eq!(detect_source("Thunderbird", "", "Invoice", "hello"), "Thunderbird");
     }
 
     #[test]
     fn rules() {
-        let mut cfg = NotificationConfig::default();
-        cfg.vip = vec!["Priya Raman".into()];
-        cfg.muted_apps = vec!["Spotify".into()];
+        let cfg = NotificationConfig {
+            vip: vec!["Priya Raman".into()],
+            muted_apps: vec!["Spotify".into()],
+            ..Default::default()
+        };
         assert_eq!(rule_triage(&cfg, "Spotify", "Spotify", "Song", "x").unwrap().0, "ignore");
         assert_eq!(rule_triage(&cfg, "Chrome", "Teams", "Priya Raman", "hi").unwrap().0, "urgent");
         assert_eq!(rule_triage(&cfg, "Chrome", "Teams", "Bob", "is prod down?").unwrap().0, "urgent");
         assert!(rule_triage(&cfg, "Chrome", "Teams", "Bob", "download finished, calm down").is_none());
+        assert_eq!(rule_triage(&cfg, "Chrome", "Teams", "Bob", "(reacted to your message) 👍").unwrap().0, "ignore");
+        assert_eq!(rule_triage(&cfg, "Chrome", "Teams", "Bob", "Bob is typing").unwrap().0, "ignore");
+    }
+
+    #[test]
+    fn watched_chats() {
+        let watch = vec!["webapp-team".to_string()];
+        let mut n = db::Notification {
+            id: 1,
+            app: "Google Chrome".into(),
+            source: "Teams".into(),
+            title: "Akilesh posted in WebApp Team".into(),
+            body: String::new(),
+            sender: None,
+            chat: None,
+            text: None,
+            category: "pending".into(),
+            summary: None,
+            reason: None,
+            during_focus: false,
+            seen: false,
+            received_at: String::new(),
+        };
+        assert_eq!(watched_chat(&watch, &n).as_deref(), Some("webapp-team"));
+        n.title = "Ravi Kumar".into();
+        n.chat = Some("webapp_team".into());
+        assert!(watched_chat(&watch, &n).is_some());
+        n.chat = Some("Creator Studio".into());
+        assert!(watched_chat(&watch, &n).is_none());
+        assert!(watched_chat(&[], &n).is_none());
     }
 }

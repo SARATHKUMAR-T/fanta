@@ -114,7 +114,11 @@ fn changed(app: &AppHandle) {
 
 /// Starts a focus block, replacing any running session. If a meeting would
 /// interrupt it, the block is shortened; the returned note says so.
-pub fn start(app: &AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> anyhow::Result<(db::FocusSession, Option<String>)> {
+pub fn start(
+    app: &AppHandle,
+    minutes: Option<u32>,
+    task_id: Option<i64>,
+) -> anyhow::Result<(db::FocusSession, Option<String>)> {
     let cfg = config(app);
     let state = app.state::<AppState>();
     let mut minutes = minutes.filter(|m| (1..=240).contains(m)).unwrap_or(cfg.focus_minutes);
@@ -122,10 +126,18 @@ pub fn start(app: &AppHandle, minutes: Option<u32>, task_id: Option<i64>) -> any
     if let Some(m) = calendar::next_meeting_within(app, minutes as i64 + MEETING_BUFFER) {
         let room = calendar::minutes_until(&m.start_at) - MEETING_BUFFER;
         if room < MIN_BLOCK_BEFORE_MEETING {
-            anyhow::bail!("“{}” starts at {} - too close for a focus block. Start one after it?", m.subject, calendar::hm(&m.start_at));
+            anyhow::bail!(
+                "“{}” starts at {} - too close for a focus block. Start one after it?",
+                m.subject,
+                calendar::hm(&m.start_at)
+            );
         }
         minutes = room as u32;
-        note = Some(format!("Shortened to {minutes} min so you're free for “{}” at {}.", m.subject, calendar::hm(&m.start_at)));
+        note = Some(format!(
+            "Shortened to {minutes} min so you're free for “{}” at {}.",
+            m.subject,
+            calendar::hm(&m.start_at)
+        ));
     }
     let session = {
         let conn = state.db.lock().unwrap();
@@ -285,7 +297,11 @@ pub fn tick(app: &AppHandle) -> anyhow::Result<()> {
             };
             desktop::notify(&name, &format!("Pomodoro done ({progress}). {what}"), false);
         } else {
-            desktop::notify(&name, &format!("Pomodoro done ({progress}). Start a {mins}-minute break when you're ready."), false);
+            desktop::notify(
+                &name,
+                &format!("Pomodoro done ({progress}). Start a {mins}-minute break when you're ready."),
+                false,
+            );
         }
     } else if cfg.auto_start_focus {
         let note = match start(app, None, done.task_id) {
@@ -316,6 +332,18 @@ mod tests {
             auto_start_focus: false,
         };
         let kinds: Vec<&str> = (1..=8).map(|n| next_break(&cfg, n)).collect();
-        assert_eq!(kinds, ["short_break", "short_break", "short_break", "long_break", "short_break", "short_break", "short_break", "long_break"]);
+        assert_eq!(
+            kinds,
+            [
+                "short_break",
+                "short_break",
+                "short_break",
+                "long_break",
+                "short_break",
+                "short_break",
+                "short_break",
+                "long_break"
+            ]
+        );
     }
 }

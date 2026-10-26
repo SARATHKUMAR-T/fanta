@@ -8,17 +8,18 @@ import { useMood } from "../companion/useMood";
 import Connections from "../Connections";
 import Inbox from "../Inbox";
 import Tasks from "../Tasks";
-import { CalendarIcon, ChatIcon, CloseIcon, GearIcon, InboxIcon, TasksIcon, TomatoIcon } from "../ui/Icons";
+import { CalendarIcon, ChatIcon, CloseIcon, GearIcon, InboxIcon, MaximizeIcon, MinimizeIcon, RestoreIcon, TasksIcon, TeachIcon, TomatoIcon } from "../ui/Icons";
 import Chat from "./Chat";
 import { FocusPill, mmss, OPEN_FOCUS_EVENT, useFocusNote, useFocusStatus } from "./focus";
 import FocusView from "./FocusView";
 import Brain from "./Brain";
 import Plugins from "./Plugins";
 import SoundSettings from "./SoundSettings";
+import Teach from "./Teach";
 import VoiceSettings from "./VoiceSettings";
 import "./panel.css";
 
-type View = "chat" | "focus" | "tasks" | "inbox" | "calendar" | "settings";
+type View = "chat" | "focus" | "tasks" | "inbox" | "calendar" | "teach" | "settings";
 
 function useStatusLine(name: string, openTasks: number) {
   const { status, remaining } = useFocusStatus();
@@ -56,6 +57,8 @@ export default function Panel() {
   const note = useFocusNote();
   // The panel window stays mounted while hidden; only count the Inbox as "read" when it's on screen.
   const [shown, setShown] = useState(true);
+  // Enlarged: the panel fills the screen, with the tabs down the side.
+  const [expanded, setExpanded] = useState(false);
   const mood = useMood();
   const name = persona?.name ?? "Fanta";
   const statusLine = useStatusLine(name, openTasks);
@@ -63,11 +66,13 @@ export default function Panel() {
 
   useEffect(() => {
     api.persona().then(setPersona);
+    api.panelExpanded().then((e) => setExpanded(!!e));
     const refreshUnseen = () => api.inboxUnseen().then(setUnseen);
     refreshUnseen();
     const subs = [
       listen("inbox://changed", refreshUnseen),
       listen<boolean>("panel://visible", (e) => setShown(e.payload)),
+      listen<boolean>("panel://expanded", (e) => setExpanded(e.payload)),
       listen("ui://reply-to", () => setView("chat")),
       listen("ui://open-settings", () => setView("settings")),
     ];
@@ -82,48 +87,159 @@ export default function Panel() {
     };
   }, []);
 
-  const tabs: { id: View; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: "chat", label: "Chat", icon: <ChatIcon size={16} /> },
-    { id: "focus", label: "Focus", icon: <TomatoIcon size={16} /> },
-    { id: "tasks", label: "Tasks", icon: <TasksIcon size={16} />, badge: openTasks },
-    { id: "inbox", label: "Inbox", icon: <InboxIcon size={16} />, badge: unseen },
-    { id: "calendar", label: "Calendar", icon: <CalendarIcon size={16} /> },
+  const tabs: {
+    id: View;
+    label: string;
+    icon: React.ReactNode;
+    badge?: number;
+    about?: string;
+  }[] = [
+    {
+      id: "chat",
+      label: "Chat",
+      icon: <ChatIcon size={16} />,
+      about: `Ask ${name} to plan, remind or take care of something`,
+    },
+    {
+      id: "focus",
+      label: "Focus",
+      icon: <TomatoIcon size={16} />,
+      about: "Pomodoro timer and how your focus is going",
+    },
+    {
+      id: "tasks",
+      label: "Tasks",
+      icon: <TasksIcon size={16} />,
+      badge: openTasks,
+      about: openTasks ? `${openTasks} open` : "All clear",
+    },
+    {
+      id: "inbox",
+      label: "Inbox",
+      icon: <InboxIcon size={16} />,
+      badge: unseen,
+      about: unseen ? `${unseen} new since you last looked` : "Messages from your notifications, sorted",
+    },
+    {
+      id: "calendar",
+      label: "Calendar",
+      icon: <CalendarIcon size={16} />,
+      about: "Today and tomorrow",
+    },
+    {
+      id: "teach",
+      label: "Teach",
+      icon: <TeachIcon size={16} />,
+      about: "Learn anything through diagrams and small steps",
+    },
   ];
+  const page =
+    view === "settings"
+      ? {
+          label: "Settings",
+          about: "Brain, voice, sounds, connections and plugins",
+        }
+      : tabs.find((t) => t.id === view)!;
+
+  // Enlarged, the window fills the screen; dragging it around would only shift it off.
+  const drag = expanded ? "false" : "true";
+  const toggleSize = () => {
+    setExpanded(!expanded);
+    api.expandPanel(!expanded);
+  };
+  // Minimize tucks the panel back into Fanta; shrink it out first so it doesn't just blink away.
+  const [tucking, setTucking] = useState(false);
+  const minimize = () => {
+    setTucking(true);
+    setTimeout(() => api.minimizePanel().finally(() => setTucking(false)), 150);
+  };
 
   return (
-    <div className="panel">
-      <header className="panel-head" data-tauri-drag-region>
-        <div className="head-avatar" data-tauri-drag-region>
+    <div className={`panel ${expanded ? "expanded" : ""} ${tucking ? "tucking" : ""}`}>
+      <header
+        className="panel-head"
+        data-tauri-drag-region={drag}
+        onMouseDown={(e) => {
+          // A double-click on the drag area would natively maximize the window; enlarge our way instead.
+          if (e.detail === 2 && !(e.target as HTMLElement).closest("button")) {
+            e.stopPropagation();
+            toggleSize();
+          }
+        }}
+      >
+        <div className="head-avatar" data-tauri-drag-region={drag}>
           <Character mood={mood} size={44} face />
         </div>
-        <div className="head-text" data-tauri-drag-region>
-          <div className="head-name" data-tauri-drag-region>
+        <div className="head-text" data-tauri-drag-region={drag}>
+          <div className="head-name" data-tauri-drag-region={drag}>
             {name}
             <span className="online" />
           </div>
-          <div className="head-status" data-tauri-drag-region>
+          <div className="head-status" data-tauri-drag-region={drag}>
             {statusLine}
           </div>
         </div>
         <FocusPill />
-        <button className={`icon-btn ${view === "settings" ? "active" : ""}`} title="Settings" onClick={() => setView(view === "settings" ? "chat" : "settings")}>
-          <GearIcon size={18} />
-        </button>
-        <button className="icon-btn" title="Close (Esc)" onClick={() => api.hidePanel()}>
-          <CloseIcon size={18} />
-        </button>
+        {!expanded && (
+          <button
+            className={`icon-btn ${view === "settings" ? "active" : ""}`}
+            title="Settings"
+            onClick={() => setView(view === "settings" ? "chat" : "settings")}
+          >
+            <GearIcon size={18} />
+          </button>
+        )}
+        <div className="win-controls">
+          <button className="icon-btn" title={`Minimize into ${name}`} aria-label="Minimize" onClick={minimize}>
+            <MinimizeIcon size={17} />
+          </button>
+          <button
+            className="icon-btn"
+            title={expanded ? "Back to normal size" : "Enlarge"}
+            aria-label={expanded ? "Restore size" : "Enlarge"}
+            onClick={toggleSize}
+          >
+            {expanded ? <RestoreIcon size={16} /> : <MaximizeIcon size={16} />}
+          </button>
+          <button className="icon-btn close" title="Close (Esc)" aria-label="Close" onClick={() => api.hidePanel()}>
+            <CloseIcon size={17} />
+          </button>
+        </div>
       </header>
 
-      {view !== "settings" && (
+      {(view !== "settings" || expanded) && (
         <nav className="seg">
           {tabs.map((t) => (
             <button key={t.id} className={view === t.id ? "active" : ""} onClick={() => setView(t.id)} title={t.label}>
               {t.icon}
-              {view === t.id && <span>{t.label}</span>}
+              {(view === t.id || expanded) && <span>{t.label}</span>}
               {!!t.badge && <em>{t.badge > 9 ? "9+" : t.badge}</em>}
             </button>
           ))}
+          {expanded && (
+            <>
+              <div className="side-spacer" />
+              <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
+                <GearIcon size={16} />
+                <span>Settings</span>
+              </button>
+              <div className="side-buddy">
+                <Character mood={mood} size={96} />
+                <div className="side-buddy-text">
+                  <b>{name}</b>
+                  <span>{statusLine}</span>
+                </div>
+              </div>
+            </>
+          )}
         </nav>
+      )}
+
+      {expanded && (
+        <div className="page-title">
+          <h1>{page.label}</h1>
+          {page.about && <p>{page.about}</p>}
+        </div>
       )}
 
       {note && <div className="toast">{note}</div>}
@@ -132,7 +248,7 @@ export default function Panel() {
         <div className={view === "chat" ? "view" : "view hidden"}>
           <Chat name={name} />
         </div>
-        <div className={view === "focus" ? "view scroll" : "view hidden"}>
+        <div className={view === "focus" ? "view scroll wide" : "view hidden"}>
           <FocusView visible={shown && view === "focus"} />
         </div>
         <div className={view === "tasks" ? "view scroll" : "view hidden"}>
@@ -144,30 +260,35 @@ export default function Panel() {
         <div className={view === "calendar" ? "view scroll" : "view hidden"}>
           <CalendarView onConnect={() => setView("settings")} />
         </div>
+        <div className={view === "teach" ? "view" : "view hidden"}>
+          <Teach mood={mood} />
+        </div>
         {view === "settings" && (
-          <div className="view scroll settings">
+          <div className="view scroll wide settings">
             <div className="settings-head">
               <button className="btn ghost" onClick={() => setView("chat")}>
                 ← Back
               </button>
               <h2>Settings</h2>
             </div>
-            <Brain />
-            <VoiceSettings />
-            <SoundSettings />
-            <Connections />
-            <Plugins />
-            <section className="card">
-              <div className="card-title">✨ {name}'s personality</div>
-              <p className="muted small">
-                Name, tone, workday, pomodoro length, notification rules and the model live in <code>persona.yaml</code>. Edit it and restart {name}.
-              </p>
-              <div className="form-actions">
-                <button className="btn ghost" onClick={() => api.openConfigDir()}>
-                  Open config folder
-                </button>
-              </div>
-            </section>
+            <div className="settings-cards">
+              <Brain />
+              <VoiceSettings />
+              <SoundSettings />
+              <Connections />
+              <Plugins />
+              <section className="card">
+                <div className="card-title">✨ {name}'s personality</div>
+                <p className="muted small">
+                  Name, tone, workday, pomodoro length, notification rules and the model live in <code>persona.yaml</code>. Edit it and restart {name}.
+                </p>
+                <div className="form-actions">
+                  <button className="btn ghost" onClick={() => api.openConfigDir()}>
+                    Open config folder
+                  </button>
+                </div>
+              </section>
+            </div>
           </div>
         )}
       </main>

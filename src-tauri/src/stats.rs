@@ -7,7 +7,8 @@ use serde::Serialize;
 use crate::db;
 
 /// Minutes actually spent in a session: wall time minus pauses.
-const ACTUAL_MINUTES: &str = "MAX(0, (julianday(COALESCE(ended_at, ?1)) - julianday(started_at)) * 1440 - paused_secs / 60.0)";
+const ACTUAL_MINUTES: &str =
+    "MAX(0, (julianday(COALESCE(ended_at, ?1)) - julianday(started_at)) * 1440 - paused_secs / 60.0)";
 
 #[derive(Serialize, Default)]
 pub struct Today {
@@ -122,7 +123,15 @@ pub fn compute(conn: &Connection, goal: i64) -> anyhow::Result<Stats> {
              FROM focus_sessions WHERE date(started_at) = ?2"
         ),
         params![now, d(today)],
-        |r| Ok(Today { pomodoros: r.get(0)?, focus_minutes: r.get(1)?, break_minutes: r.get(2)?, interrupted: r.get(3)?, goal: 0 }),
+        |r| {
+            Ok(Today {
+                pomodoros: r.get(0)?,
+                focus_minutes: r.get(1)?,
+                break_minutes: r.get(2)?,
+                interrupted: r.get(3)?,
+                goal: 0,
+            })
+        },
     )?;
     t.goal = goal;
 
@@ -133,7 +142,13 @@ pub fn compute(conn: &Connection, goal: i64) -> anyhow::Result<Stats> {
         .map(|i| {
             let date = monday + Duration::days(i);
             let (p, m) = rows.iter().find(|r| r.0 == d(date)).map(|r| (r.1, r.2)).unwrap_or((0, 0));
-            Day { date: d(date), label: date.format("%a").to_string(), pomodoros: p, minutes: m, is_today: date == today }
+            Day {
+                date: d(date),
+                label: date.format("%a").to_string(),
+                pomodoros: p,
+                minutes: m,
+                is_today: date == today,
+            }
         })
         .collect();
 
@@ -163,7 +178,9 @@ pub fn compute(conn: &Connection, goal: i64) -> anyhow::Result<Stats> {
 
     // Streaks (all time)
     let dates: Vec<NaiveDate> = conn
-        .prepare("SELECT DISTINCT date(started_at) FROM focus_sessions WHERE kind = 'focus' AND completed = 1 ORDER BY 1")?
+        .prepare(
+            "SELECT DISTINCT date(started_at) FROM focus_sessions WHERE kind = 'focus' AND completed = 1 ORDER BY 1",
+        )?
         .query_map([], |r| r.get::<_, String>(0))?
         .filter_map(|r| r.ok().and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()))
         .collect();
@@ -178,9 +195,14 @@ pub fn compute(conn: &Connection, goal: i64) -> anyhow::Result<Stats> {
              FROM focus_sessions f LEFT JOIN tasks t ON t.id = f.task_id
              WHERE f.kind = 'focus' AND date(f.started_at) >= ?2
              GROUP BY COALESCE(t.title, 'No task') ORDER BY 2 DESC, 3 DESC LIMIT 6",
-            ACTUAL_MINUTES.replace("ended_at", "f.ended_at").replace("started_at", "f.started_at").replace("paused_secs", "f.paused_secs")
+            ACTUAL_MINUTES
+                .replace("ended_at", "f.ended_at")
+                .replace("started_at", "f.started_at")
+                .replace("paused_secs", "f.paused_secs")
         ))?
-        .query_map(params![now, from30], |r| Ok(TaskStat { title: r.get(0)?, pomodoros: r.get(1)?, minutes: r.get(2)? }))?
+        .query_map(params![now, from30], |r| {
+            Ok(TaskStat { title: r.get(0)?, pomodoros: r.get(1)?, minutes: r.get(2)? })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
 
     // Best hours, last 30 days
@@ -203,7 +225,10 @@ pub fn compute(conn: &Connection, goal: i64) -> anyhow::Result<Stats> {
                     CAST(ROUND({}) AS INTEGER), f.completed
              FROM focus_sessions f LEFT JOIN tasks t ON t.id = f.task_id
              WHERE f.ended_at IS NOT NULL ORDER BY f.id DESC LIMIT 80",
-            ACTUAL_MINUTES.replace("ended_at", "f.ended_at").replace("started_at", "f.started_at").replace("paused_secs", "f.paused_secs")
+            ACTUAL_MINUTES
+                .replace("ended_at", "f.ended_at")
+                .replace("started_at", "f.started_at")
+                .replace("paused_secs", "f.paused_secs")
         ))?
         .query_map(params![now], |r| {
             Ok(HistoryItem {
@@ -282,7 +307,17 @@ mod tests {
         c
     }
 
-    fn add(c: &Connection, kind: &str, day_offset: i64, hour: u32, minutes: i64, completed: bool, paused_secs: i64, task: Option<i64>) {
+    #[allow(clippy::too_many_arguments)]
+    fn add(
+        c: &Connection,
+        kind: &str,
+        day_offset: i64,
+        hour: u32,
+        minutes: i64,
+        completed: bool,
+        paused_secs: i64,
+        task: Option<i64>,
+    ) {
         let start = (Local::now().date_naive() - Duration::days(day_offset)).and_hms_opt(hour, 0, 0).unwrap();
         let end = start + Duration::minutes(minutes) + Duration::seconds(paused_secs);
         c.execute(

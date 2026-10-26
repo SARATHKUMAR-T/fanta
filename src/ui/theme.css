@@ -1,23 +1,28 @@
 @import "@fontsource-variable/nunito";
 
 :root {
-  --bg: #fff8f2;
-  --bg-glow: #ffe3cc;
+  /* The theme colour everything is built around: a deep violet. */
+  --brand: oklch(28.3% 0.141 291.089);
+  --bg: oklch(98.4% 0.009 293);
+  --bg-glow: oklch(92% 0.05 293);
   --surface: #ffffff;
-  --surface-2: #fff1e6;
-  --text: #2b211c;
-  --muted: #8b7b71;
-  --accent: #ff7a3d;
-  --accent-2: #ffb054;
-  --accent-ink: #c4471a;
-  --accent-soft: #ffe7d7;
-  --border: rgba(110, 60, 25, 0.11);
-  --ok: #3b9a6f;
-  --ok-soft: #dcf2e7;
-  --danger: #dc4f3a;
-  --danger-soft: #fde1db;
-  --shadow-lg: 0 18px 48px rgba(120, 58, 18, 0.24), 0 2px 8px rgba(120, 58, 18, 0.1);
-  --shadow-sm: 0 2px 10px rgba(120, 58, 18, 0.08);
+  --surface-2: oklch(95.6% 0.022 294);
+  --text: var(--brand);
+  --muted: oklch(54% 0.06 292);
+  --accent: oklch(54.1% 0.281 293.009);
+  --accent-2: oklch(70.2% 0.183 293.541);
+  --accent-ink: oklch(43.2% 0.232 292.759);
+  --accent-soft: oklch(94.3% 0.029 294.588);
+  /* Your own chat bubbles and other bold surfaces. */
+  --bold: linear-gradient(135deg, oklch(43.2% 0.232 292.759), var(--brand));
+  --glow: color-mix(in oklch, var(--accent) 32%, transparent);
+  --border: color-mix(in oklch, var(--brand) 11%, transparent);
+  --ok: oklch(60% 0.13 160);
+  --ok-soft: oklch(94% 0.04 160);
+  --danger: oklch(58% 0.2 27);
+  --danger-soft: oklch(94% 0.035 27);
+  --shadow-lg: 0 18px 48px color-mix(in oklch, var(--brand) 26%, transparent), 0 2px 8px color-mix(in oklch, var(--brand) 10%, transparent);
+  --shadow-sm: 0 2px 10px color-mix(in oklch, var(--brand) 8%, transparent);
   --radius: 22px;
   font-family: "Nunito Variable", "Nunito", system-ui, sans-serif;
   font-size: 15px;
@@ -27,23 +32,24 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1916;
-    --bg-glow: #3a2416;
-    --surface: #2a231f;
-    --surface-2: #332a24;
-    --text: #f5ece5;
-    --muted: #a8988d;
-    --accent: #ff8a4d;
-    --accent-2: #ffb054;
-    --accent-ink: #ffb08a;
-    --accent-soft: #48291a;
-    --border: rgba(255, 255, 255, 0.08);
-    --ok: #5cc195;
-    --ok-soft: #1f3a2e;
-    --danger: #ff7a66;
-    --danger-soft: #45231d;
-    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
-    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.3);
+    --bg: oklch(19% 0.075 291);
+    --bg-glow: var(--brand);
+    --surface: oklch(24.5% 0.1 291);
+    --surface-2: oklch(28.3% 0.12 291.089);
+    --text: oklch(96.5% 0.014 294);
+    --muted: oklch(74% 0.06 293);
+    --accent: oklch(60.6% 0.25 292.717);
+    --accent-2: oklch(70.2% 0.183 293.541);
+    --accent-ink: oklch(81.1% 0.111 293.571);
+    --accent-soft: oklch(32% 0.13 291);
+    --bold: linear-gradient(135deg, oklch(54.1% 0.281 293.009), oklch(38% 0.189 293.745));
+    --border: oklch(100% 0 0 / 0.09);
+    --ok: oklch(74% 0.13 160);
+    --ok-soft: oklch(30% 0.06 160);
+    --danger: oklch(72% 0.16 27);
+    --danger-soft: oklch(30% 0.07 27);
+    --shadow-lg: 0 18px 48px oklch(8% 0.05 291 / 0.6);
+    --shadow-sm: 0 2px 10px oklch(8% 0.05 291 / 0.35);
   }
 }
 

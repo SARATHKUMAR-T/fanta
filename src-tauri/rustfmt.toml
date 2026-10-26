@@ -1,0 +1,3 @@
+# Matches the hand-written style: wide lines, short items kept on one line.
+max_width = 120
+use_small_heuristics = "Max"

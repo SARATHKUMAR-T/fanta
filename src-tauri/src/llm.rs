@@ -56,7 +56,15 @@ pub struct Image {
 
 impl Message {
     pub fn new(role: &str, content: impl Into<String>) -> Self {
-        Self { role: role.into(), content: content.into(), tool_calls: vec![], tool_name: None, tool_call_id: None, raw: None, images: vec![] }
+        Self {
+            role: role.into(),
+            content: content.into(),
+            tool_calls: vec![],
+            tool_name: None,
+            tool_call_id: None,
+            raw: None,
+            images: vec![],
+        }
     }
 }
 
@@ -143,13 +151,8 @@ impl Ollama {
             "stream": false,
             "options": { "temperature": 0, "num_ctx": CONTEXT_TOKENS },
         });
-        let resp = self
-            .http
-            .post(format!("{}/api/chat", self.base_url))
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?;
+        let resp =
+            self.http.post(format!("{}/api/chat", self.base_url)).json(&body).send().await?.error_for_status()?;
         let chunk: Chunk = resp.json().await?;
         let content = chunk.message.map(|m| m.content).unwrap_or_default();
         Ok(serde_json::from_str(&content)?)

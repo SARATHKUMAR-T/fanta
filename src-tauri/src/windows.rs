@@ -6,6 +6,8 @@ use tauri::{
     WindowEvent,
 };
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::{db, AppState};
 
 pub const COMPANION: &str = "companion";
@@ -13,10 +15,13 @@ pub const PANEL: &str = "panel";
 
 /// Logical sizes. The companion grows upward when it shows a speech bubble.
 const COMPANION_SIZE: (f64, f64) = (170.0, 200.0);
-const COMPANION_BUBBLE_SIZE: (f64, f64) = (300.0, 330.0);
+const COMPANION_BUBBLE_SIZE: (f64, f64) = (320.0, 410.0);
 const PANEL_SIZE: (f64, f64) = (420.0, 660.0);
 const MARGIN: i32 = 24;
 const POS_KEY: &str = "companion_pos";
+
+/// Whether the panel fills the screen instead of sitting beside Fanta.
+static EXPANDED: AtomicBool = AtomicBool::new(false);
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let companion = WebviewWindowBuilder::new(app, COMPANION, WebviewUrl::App("index.html?view=companion".into()))
@@ -44,7 +49,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .resizable(false)
+        // Needed for GTK to resize the web content when the panel is enlarged.
+        .resizable(true)
         .visible(false)
         .build()?;
 
@@ -87,10 +93,14 @@ fn place_companion(app: &AppHandle, w: &WebviewWindow) {
     let monitor = w.primary_monitor().ok().flatten();
     let pos = match (pos, &monitor) {
         // Ignore a saved spot that's now off-screen (e.g. a monitor was unplugged).
-        (Some(p), _) if w.available_monitors().unwrap_or_default().iter().any(|m| {
-            let (mp, ms) = (m.position(), m.size());
-            p.x >= mp.x && p.y >= mp.y && p.x < mp.x + ms.width as i32 - 40 && p.y < mp.y + ms.height as i32 - 40
-        }) => p,
+        (Some(p), _)
+            if w.available_monitors().unwrap_or_default().iter().any(|m| {
+                let (mp, ms) = (m.position(), m.size());
+                p.x >= mp.x && p.y >= mp.y && p.x < mp.x + ms.width as i32 - 40 && p.y < mp.y + ms.height as i32 - 40
+            }) =>
+        {
+            p
+        }
         (_, Some(m)) => {
             let scale = m.scale_factor();
             let (mp, ms) = (m.position(), m.size());
@@ -104,18 +114,36 @@ fn place_companion(app: &AppHandle, w: &WebviewWindow) {
     let _ = w.set_position(pos);
 }
 
+/// On screen: shown and not minimized.
 fn panel_visible(app: &AppHandle) -> bool {
-    app.get_webview_window(PANEL).and_then(|p| p.is_visible().ok()).unwrap_or(false)
+    app.get_webview_window(PANEL)
+        .map(|p| p.is_visible().unwrap_or(false) && !p.is_minimized().unwrap_or(false))
+        .unwrap_or(false)
 }
 
-/// Puts the panel beside the companion, on whichever side has room.
+/// Puts the panel beside the companion, on whichever side has room; or, when
+/// enlarged, over the whole usable area of Fanta's screen.
 fn position_panel(app: &AppHandle) -> tauri::Result<()> {
     let (Some(c), Some(p)) = (app.get_webview_window(COMPANION), app.get_webview_window(PANEL)) else {
         return Ok(());
     };
+    if EXPANDED.load(Ordering::Relaxed) {
+        let Some(m) = c.current_monitor()?.or(c.primary_monitor()?) else { return Ok(()) };
+        let area = m.work_area();
+        p.set_size(area.size)?;
+        return p.set_position(area.position);
+    }
+    if p.is_maximized()? {
+        p.unmaximize()?;
+    }
+    let scale = p.scale_factor()?;
+    let compact = PhysicalSize::new((PANEL_SIZE.0 * scale) as u32, (PANEL_SIZE.1 * scale) as u32);
+    if p.outer_size()? != compact {
+        p.set_size(compact)?;
+    }
     let cpos = c.outer_position()?;
     let csize = c.outer_size()?;
-    let psize = p.outer_size()?;
+    let psize = compact;
     let Some(m) = c.current_monitor()?.or(c.primary_monitor()?) else { return Ok(()) };
     let (mp, ms) = (m.position(), m.size());
     let (left, right) = (mp.x, mp.x + ms.width as i32);
@@ -139,11 +167,36 @@ pub fn show_panel(app: &AppHandle) -> tauri::Result<()> {
     if let Some(c) = app.get_webview_window(COMPANION) {
         c.show()?;
     }
+    // The window manager may have minimized it (a keyboard shortcut).
+    p.unminimize()?;
     position_panel(app)?;
     p.show()?;
-    p.unminimize()?;
     p.set_focus()?;
     let _ = app.emit("panel://visible", true);
+    Ok(())
+}
+
+/// Enlarges the panel to fill the screen, or puts it back beside Fanta.
+pub fn expand_panel(app: &AppHandle, expanded: bool) -> tauri::Result<()> {
+    EXPANDED.store(expanded, Ordering::Relaxed);
+    position_panel(app)?;
+    let _ = app.emit("panel://expanded", expanded);
+    Ok(())
+}
+
+pub fn panel_expanded() -> bool {
+    EXPANDED.load(Ordering::Relaxed)
+}
+
+/// Tucks the panel back into Fanta: back to its normal size beside her, and
+/// hidden until she's clicked. A real minimize would leave it as a separate
+/// window in the taskbar, detached from her.
+pub fn minimize_panel(app: &AppHandle) -> tauri::Result<()> {
+    hide_panel(app)?;
+    if EXPANDED.swap(false, Ordering::Relaxed) {
+        position_panel(app)?;
+        let _ = app.emit("panel://expanded", false);
+    }
     Ok(())
 }
 

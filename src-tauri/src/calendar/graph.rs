@@ -168,10 +168,7 @@ fn utc_to_local_ts(s: &str) -> Option<String> {
 
 fn local_ts_to_graph(ts: &str) -> anyhow::Result<Value> {
     let naive = NaiveDateTime::parse_from_str(ts, db::TS)?;
-    let local = naive
-        .and_local_timezone(Local)
-        .earliest()
-        .ok_or_else(|| anyhow::anyhow!("invalid local time {ts}"))?;
+    let local = naive.and_local_timezone(Local).earliest().ok_or_else(|| anyhow::anyhow!("invalid local time {ts}"))?;
     Ok(json!({ "dateTime": local.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S").to_string(), "timeZone": "UTC" }))
 }
 
@@ -257,7 +254,13 @@ pub async fn create_event(http: &reqwest::Client, token: &str, m: &NewMeeting) -
 }
 
 /// `response` is "accept", "decline", or "tentativelyAccept".
-pub async fn respond(http: &reqwest::Client, token: &str, remote_id: &str, response: &str, comment: &str) -> anyhow::Result<()> {
+pub async fn respond(
+    http: &reqwest::Client,
+    token: &str,
+    remote_id: &str,
+    response: &str,
+    comment: &str,
+) -> anyhow::Result<()> {
     let resp = http
         .post(format!("{GRAPH}/me/events/{}/{response}", urlencoding::encode(remote_id)))
         .bearer_auth(token)

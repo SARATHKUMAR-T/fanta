@@ -172,12 +172,10 @@ fn base_event(ev: &VEvent, uid: &str, start: DateTime<Utc>, end: DateTime<Utc>, 
         end_at: local_ts(end),
         all_day,
         location: ev.text("LOCATION"),
-        join_url: ev
-            .text("X-MICROSOFT-SKYPETEAMSMEETINGURL")
-            .or_else(|| find_join_url(&description)),
-        organizer: ev
-            .get("ORGANIZER")
-            .and_then(|p| p.params.get("CN").cloned().or_else(|| Some(p.value.trim_start_matches("mailto:").to_string()))),
+        join_url: ev.text("X-MICROSOFT-SKYPETEAMSMEETINGURL").or_else(|| find_join_url(&description)),
+        organizer: ev.get("ORGANIZER").and_then(|p| {
+            p.params.get("CN").cloned().or_else(|| Some(p.value.trim_start_matches("mailto:").to_string()))
+        }),
         response: None,
         show_as: Some(busy_status(&ev.text("X-MICROSOFT-CDO-BUSYSTATUS").unwrap_or_default()).to_string()),
         cancelled: ev.text("STATUS").is_some_and(|s| s.eq_ignore_ascii_case("CANCELLED")),
@@ -220,13 +218,18 @@ pub fn parse(text: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<NewCalEv
         let (Some(uid), Some((start, tz, all_day))) = (ev.text("UID"), ev.get("DTSTART").and_then(parse_dt)) else {
             continue;
         };
-        let end = ev.get("DTEND").and_then(parse_dt).map(|e| e.0).unwrap_or(start + Duration::hours(if all_day { 24 } else { 1 }));
+        let end = ev
+            .get("DTEND")
+            .and_then(parse_dt)
+            .map(|e| e.0)
+            .unwrap_or(start + Duration::hours(if all_day { 24 } else { 1 }));
         let length = end - start;
 
         let starts: Vec<DateTime<Utc>> = match ev.get("RRULE") {
             None => vec![start],
             Some(rule) => {
-                let mut spec = vec![rrule_line("DTSTART", start, tz), format!("RRULE:{}", normalize_rrule(&rule.value))];
+                let mut spec =
+                    vec![rrule_line("DTSTART", start, tz), format!("RRULE:{}", normalize_rrule(&rule.value))];
                 for ex in ev.props.iter().filter(|p| p.name == "EXDATE") {
                     for v in ex.value.split(',') {
                         let p = Prop { value: v.to_string(), ..ex.clone() };

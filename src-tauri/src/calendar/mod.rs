@@ -173,9 +173,8 @@ pub async fn begin_graph_sign_in(app: &AppHandle, client_id: &str, tenant: &str)
     tauri::async_runtime::spawn(async move {
         let result = async {
             let tokens = graph::poll_device_code(&http, &gapp, &pending).await?;
-            let refresh_token = tokens
-                .refresh_token
-                .ok_or_else(|| anyhow::anyhow!("no refresh token - is offline_access granted?"))?;
+            let refresh_token =
+                tokens.refresh_token.ok_or_else(|| anyhow::anyhow!("no refresh token - is offline_access granted?"))?;
             keyring()?.set_password(&refresh_token)?;
             let account = graph::me(&http, &tokens.access_token).await.unwrap_or_else(|_| "Outlook".into());
             {
@@ -263,10 +262,7 @@ pub fn next_meeting_within(app: &AppHandle, minutes: i64) -> Option<db::CalEvent
     let state = app.state::<AppState>();
     let conn = state.db.lock().unwrap();
     let now = db::now_ts();
-    db::busy_between(&conn, &now, &ts_in(minutes))
-        .ok()?
-        .into_iter()
-        .find(|e| e.start_at >= now)
+    db::busy_between(&conn, &now, &ts_in(minutes)).ok()?.into_iter().find(|e| e.start_at >= now)
 }
 
 pub fn in_meeting_now(app: &AppHandle) -> Option<db::CalEvent> {
@@ -309,10 +305,7 @@ pub fn today_summary(app: &AppHandle) -> String {
     if events.is_empty() {
         "Meetings for the rest of today: none.".into()
     } else {
-        format!(
-            "Meetings for the rest of today:\n{}",
-            events.iter().map(describe).collect::<Vec<_>>().join("\n")
-        )
+        format!("Meetings for the rest of today:\n{}", events.iter().map(describe).collect::<Vec<_>>().join("\n"))
     }
 }
 

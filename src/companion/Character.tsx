@@ -17,9 +17,17 @@ export type Mood =
   | "wink"
   | "listening"
   | "worried"
-  | "wave";
+  | "excited"
+  | "shy"
+  | "caring"
+  | "pout"
+  | "laugh";
 
 const HAIR_DARK = "#e2572b";
+/** The hoodie is the theme colour, oklch(28.3% 0.141 291.089), lit from above. */
+const HOODIE_TOP = "#4c1d95";
+const HOODIE = "#2e1065";
+const HOODIE_EDGE = "#1f0a4d";
 const LINE = "#4a2a1c";
 const EY = 106; // eye center line
 
@@ -29,6 +37,7 @@ function eyeStyle(mood: Mood, left: boolean): EyeStyle {
   switch (mood) {
     case "happy":
     case "proud":
+    case "laugh":
       return "closed-happy";
     case "wink":
       return left ? "open" : "closed-happy";
@@ -56,8 +65,14 @@ function gaze(mood: Mood): { dx: number; dy: number; wide: number; pupil: number
       return { dx: 0, dy: 0, wide: 1.1, pupil: 0.82 };
     case "worried":
       return { dx: -1.5, dy: 1, wide: 1, pupil: 0.9 };
-    case "wave":
-      return { dx: 0, dy: -0.5, wide: 1.05, pupil: 1.04 };
+    case "excited":
+      return { dx: 0, dy: -1, wide: 1.12, pupil: 1.08 };
+    case "shy":
+      return { dx: -3.5, dy: 3.5, wide: 0.96, pupil: 1 };
+    case "caring":
+      return { dx: 0, dy: 1.5, wide: 1, pupil: 1.06 };
+    case "pout":
+      return { dx: 3.5, dy: 0.5, wide: 1, pupil: 0.95 };
     default:
       return { dx: 0, dy: 0, wide: 1, pupil: 1 };
   }
@@ -78,6 +93,10 @@ function lid(mood: Mood): { outer: number; inner: number } | null {
       return { outer: -5, inner: -12 }; // inner corners pulled up
     case "sad":
       return { outer: -1, inner: -11 }; // drooping outward
+    case "caring":
+      return { outer: -8, inner: -11 }; // soft, a little sorry for you
+    case "pout":
+      return { outer: -9, inner: -4 }; // inner corners down: grumpy
     default:
       return null;
   }
@@ -89,7 +108,7 @@ function star(cx: number, cy: number, r: number) {
   return `M${cx} ${cy - r} Q${cx + k} ${cy - k} ${cx + r} ${cy} Q${cx + k} ${cy + k} ${cx} ${cy + r} Q${cx - k} ${cy + k} ${cx - r} ${cy} Q${cx - k} ${cy - k} ${cx} ${cy - r} Z`;
 }
 
-function Eye({ x, mood }: { x: number; mood: Mood }) {
+function Eye({ x, mood, look }: { x: number; mood: Mood; look: { x: number; y: number } }) {
   const left = x < 100;
   const style = eyeStyle(mood, left);
   if (style === "closed-happy") {
@@ -117,12 +136,13 @@ function Eye({ x, mood }: { x: number; mood: Mood }) {
   }
   const { dx, dy, wide: k, pupil } = gaze(mood);
   const l = lid(mood);
-  const starry = mood === "wave" || mood === "surprised";
+  const starry = mood === "surprised" || mood === "excited";
   // Lid corners: the outer corner is on the left for the left eye, mirrored for the right.
   const [ly1, ly2] = l ? (left ? [EY + l.outer, EY + l.inner] : [EY + l.inner, EY + l.outer]) : [0, 0];
   return (
     <g className="eye" style={{ transformOrigin: `${x}px ${EY}px` }}>
       <ellipse cx={x} cy={EY} rx={13 * k} ry={15.5 * k} fill="#fff" />
+      <g transform={`translate(${look.x} ${look.y})`}>
       <g className="pupils">
         <ellipse cx={x + dx} cy={EY + 1.5 + dy} rx={10.6 * pupil} ry={13.6 * pupil} fill="url(#iris)" />
         <ellipse cx={x + dx} cy={EY + 2.5 + dy} rx={5 * pupil} ry={6.6 * pupil} fill="#3a1a0e" />
@@ -141,6 +161,7 @@ function Eye({ x, mood }: { x: number; mood: Mood }) {
         )}
         <circle cx={x + 4.5 + dx} cy={EY + 7 + dy} r={mood === "sad" ? 2.8 : 2} fill="#fff" opacity={0.9} className={mood === "sad" ? "wobble" : undefined} />
         <circle cx={x + 5.5 + dx} cy={EY - 6 + dy} r={1.3} fill="#fff" opacity={0.8} />
+      </g>
       </g>
       {l ? (
         <>
@@ -167,7 +188,6 @@ function Brows({ mood }: { mood: Mood }) {
     idle: [85, 80, 84],
     happy: [83, 77, 82],
     proud: [83, 77, 82],
-    wave: [83, 77, 82],
     love: [83, 77, 82],
     wink: [83, 77, 82],
     talking: [84, 79, 83],
@@ -179,6 +199,11 @@ function Brows({ mood }: { mood: Mood }) {
     focus: [83, 81, 85],
     listening: [84, 78, 82],
     sleepy: [87, 84, 86],
+    excited: [80, 73, 78],
+    shy: [85, 80, 79],
+    caring: [85, 80, 78],
+    pout: [82, 82, 88],
+    laugh: [83, 76, 81],
   };
   const [o, m, i] = shape[mood].map((y) => y - 4);
   return (
@@ -193,13 +218,26 @@ function Mouth({ mood }: { mood: Mood }) {
   switch (mood) {
     case "happy":
     case "proud":
-    case "wave":
       return (
         <g>
           <path d="M92 129 Q100 141 108 129 Z" fill="#c4473b" />
           <path d="M95 133.5 Q100 137 105 133.5" fill="#ff8f86" />
         </g>
       );
+    case "excited":
+    case "laugh":
+      return (
+        <g className={mood === "laugh" ? "giggle" : undefined}>
+          <path d="M90 128 Q100 145 110 128 Z" fill="#c4473b" />
+          <path d="M94 135 Q100 140.5 106 135" fill="#ff8f86" />
+        </g>
+      );
+    case "shy":
+      return <path d="M95.5 131.5 q2.25 1.8 4.5 0 q2.25 1.8 4.5 0" fill="none" stroke={LINE} strokeWidth={2.2} strokeLinecap="round" />;
+    case "caring":
+      return <path d="M94 130.5 Q100 135 106 130.5" fill="none" stroke={LINE} strokeWidth={2.3} strokeLinecap="round" />;
+    case "pout":
+      return <path d="M97 134 Q100 130.8 103 134" fill="none" stroke={LINE} strokeWidth={2.4} strokeLinecap="round" />;
     case "wink":
       return (
         <g>
@@ -254,9 +292,35 @@ function FloatHeart({ x, y, delay }: { x: number; y: number; delay: number }) {
   );
 }
 
-/** `face` crops to the head, for avatars. */
-export default function Character({ mood = "idle", size = 140, face = false }: { mood?: Mood; size?: number; face?: boolean }) {
-  const blush = mood === "love" || mood === "proud" || mood === "wink" ? 0.5 : mood === "sad" ? 0.15 : 0.3;
+/** The little cross-popping vein of anime annoyance. */
+function Vein() {
+  return (
+    <g className="vein" fill="none" stroke="#e8453c" strokeWidth={2.6} strokeLinecap="round" transform="translate(150 56)">
+      <path d="M-7 -2 q5 0 5 -5" />
+      <path d="M2 -7 q0 5 5 5" />
+      <path d="M7 2 q-5 0 -5 5" />
+      <path d="M-2 7 q0 -5 -5 -5" />
+    </g>
+  );
+}
+
+/**
+ * `face` crops to the head, for avatars. `look` nudges the pupils (about ±3)
+ * toward something, like the mouse pointer.
+ */
+export default function Character({
+  mood = "idle",
+  size = 140,
+  face = false,
+  look = { x: 0, y: 0 },
+}: {
+  mood?: Mood;
+  size?: number;
+  face?: boolean;
+  look?: { x: number; y: number };
+}) {
+  const blush =
+    mood === "shy" ? 0.8 : mood === "love" || mood === "proud" || mood === "wink" || mood === "pout" ? 0.5 : mood === "excited" || mood === "caring" ? 0.42 : mood === "sad" ? 0.15 : 0.3;
   return (
     <svg
       className={`character mood-${mood}`}
@@ -277,8 +341,8 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           <stop offset="1" stopColor="#5a2614" />
         </radialGradient>
         <linearGradient id="hoodie" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#fffaf3" />
-          <stop offset="1" stopColor="#f6e3cf" />
+          <stop offset="0" stopColor={HOODIE_TOP} />
+          <stop offset="1" stopColor={HOODIE} />
         </linearGradient>
         <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#ffeadb" />
@@ -290,8 +354,8 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
 
       <g className="body">
         {/* hoodie */}
-        <path d="M50 220 C50 182 70 164 100 162 C130 164 150 182 150 220 Z" fill="url(#hoodie)" stroke="#e9cdb2" strokeWidth={1.5} />
-        <path d="M74 170 C82 182 118 182 126 170" fill="none" stroke="#e9cdb2" strokeWidth={2} />
+        <path d="M50 220 C50 182 70 164 100 162 C130 164 150 182 150 220 Z" fill="url(#hoodie)" stroke={HOODIE_EDGE} strokeWidth={1.5} />
+        <path d="M74 170 C82 182 118 182 126 170" fill="none" stroke="#7c3aed" strokeWidth={2} />
         <path d="M90 178 L88 200" stroke="#ff8a3d" strokeWidth={2.4} strokeLinecap="round" />
         <path d="M110 178 L112 200" stroke="#ff8a3d" strokeWidth={2.4} strokeLinecap="round" />
         <circle cx={88} cy={202} r={2.6} fill="#e2572b" />
@@ -314,7 +378,7 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
         <path d="M50 100 C50 64 74 46 100 46 C126 46 150 64 150 100 C150 132 128 153 100 155 C72 153 50 132 50 100 Z" fill="url(#skin)" />
         <ellipse cx={69} cy={126} rx={9} ry={4.5} fill="#ff7f73" opacity={blush} />
         <ellipse cx={131} cy={126} rx={9} ry={4.5} fill="#ff7f73" opacity={blush} />
-        {(mood === "love" || mood === "proud") && (
+        {(mood === "love" || mood === "proud" || mood === "shy") && (
           <g stroke="#ff7f73" strokeWidth={1.2} strokeLinecap="round" opacity={0.7}>
             <path d="M64 124 l-2 4 M69 124 l-2 4 M74 124 l-2 4" />
             <path d="M126 124 l-2 4 M131 124 l-2 4 M136 124 l-2 4" />
@@ -324,8 +388,8 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
         {/* keyed by mood so each new expression eases in instead of snapping */}
         <g key={mood} className="face-pop">
           <g className="eyes">
-            <Eye x={77} mood={mood} />
-            <Eye x={123} mood={mood} />
+            <Eye x={77} mood={mood} look={look} />
+            <Eye x={123} mood={mood} look={look} />
           </g>
           <Mouth mood={mood} />
         </g>
@@ -360,6 +424,8 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
           </g>
         )}
         {mood === "sad" && <path className="tear" d="M66 118 q-4 7 0 9.5 q4 -2.5 0 -9.5 Z" fill="#8fd0ff" stroke="#5aa9e6" strokeWidth={0.8} />}
+        {mood === "pout" && <ellipse className="puff" cx={131} cy={124} rx={10} ry={7} fill="#ffb3a6" opacity={0.55} />}
+        {mood === "laugh" && <path className="joy-tear" d="M137 104 q4 5 1 8 q-4 -1 -1 -8 Z" fill="#a8dcff" stroke="#6bb6ea" strokeWidth={0.8} />}
         {mood === "worried" && <path className="sweat" d="M146 74 q-6 10 0 13 q6 -3 0 -13 Z" fill="#a8dcff" stroke="#6bb6ea" strokeWidth={1} />}
         {mood === "listening" && (
           <g className="listen-waves" fill="none" stroke="#ff8a3d" strokeWidth={2} strokeLinecap="round">
@@ -404,6 +470,16 @@ export default function Character({ mood = "idle", size = 140, face = false }: {
         </g>
       )}
       {mood === "wink" && <Sparkle x={152} y={92} s={7} delay={0} />}
+      {mood === "pout" && <Vein />}
+      {mood === "excited" && (
+        <g>
+          <Sparkle x={26} y={60} s={10} delay={0} />
+          <Sparkle x={176} y={36} s={12} delay={0.2} />
+          <Sparkle x={186} y={96} s={7} delay={0.4} />
+          <Sparkle x={16} y={118} s={7} delay={0.55} />
+        </g>
+      )}
+      {mood === "caring" && <FloatHeart x={166} y={60} delay={0} />}
     </svg>
   );
 }

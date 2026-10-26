@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, BrainStatus, Provider } from "../api";
+import { Combo } from "../ui/Select";
 
 const PROVIDERS: { id: Provider; name: string; badge: string; blurb: string; keyHint: string; keyUrl: string }[] = [
   { id: "local", name: "On this computer", badge: "🏠", blurb: "Private and free. Slower on CPU.", keyHint: "", keyUrl: "" },
@@ -112,12 +113,7 @@ export default function Brain() {
           <label>
             Model
             <div className="inline">
-              <input list={`models-${selected}`} value={model} onChange={(e) => setModel(e.target.value)} placeholder="Fetch the list, or type a model id" />
-              <datalist id={`models-${selected}`}>
-                {models.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              <Combo value={model} suggestions={models} onChange={setModel} placeholder="Fetch the list, or type a model id" />
               <button
                 className="btn ghost"
                 disabled={busy || !hasKey}

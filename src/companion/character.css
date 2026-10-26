@@ -38,7 +38,6 @@
 .mood-sad .head { animation: droop 3s ease-in-out infinite; }
 .mood-worried .head { animation: fidget 1.4s ease-in-out infinite; }
 .mood-proud .head { animation: bounce-soft 1.1s ease-in-out infinite; }
-.mood-wave .head { animation: greet 0.7s ease-out 1, sway 5.2s ease-in-out 0.7s infinite; }
 .mood-love .head { animation: sway 2.6s ease-in-out infinite; }
 .mood-wink .head { animation: tilt-wink 0.6s ease-out 1 forwards; }
 .character .face-pop { animation: face-pop 0.22s ease-out; transform-origin: 100px 115px; }
@@ -52,6 +51,17 @@
 .character .listen-waves path { animation: ping 1.2s ease-out infinite; }
 .character .listen-waves path:nth-child(2) { animation-delay: 0.3s; }
 
+.mood-excited .head { animation: bounce-big 0.55s ease-in-out 3, bounce-soft 1.1s ease-in-out 1.65s infinite; }
+.mood-excited .body { animation: bounce-big 0.55s ease-in-out 3, breathe 3.6s ease-in-out 1.65s infinite; }
+.mood-shy .head { animation: shy-tilt 0.5s ease-out forwards; }
+.mood-caring .head { animation: caring-tilt 0.6s ease-out forwards; }
+.mood-pout .head { animation: huff 0.5s ease-out 1, pout-turn 0.4s ease-out 0.5s forwards; }
+.mood-laugh .head { animation: giggle-shake 0.18s ease-in-out 10 alternate, sway 5.2s ease-in-out 1.8s infinite; }
+.character .giggle { animation: talk 0.18s ease-in-out infinite alternate; transform-origin: 100px 132px; }
+.character .vein { animation: pop 0.35s ease-out infinite alternate; transform-box: fill-box; transform-origin: center; }
+.character .puff { animation: puff 1.2s ease-in-out infinite; transform-origin: 131px 124px; }
+.character .joy-tear { animation: tear 1.1s ease-in infinite; }
+
 @keyframes glance { 0%, 40%, 100% { transform: translateX(0); } 44%, 52% { transform: translateX(-2.5px); } 56%, 64% { transform: translateX(2.5px); } 68% { transform: translateX(0); } }
 @keyframes jolt { 0% { transform: translateY(0) scale(1); } 30% { transform: translateY(-9px) scale(1.04); } 100% { transform: translateY(0) scale(1); } }
 @keyframes droop { 0%, 100% { transform: rotate(3deg) translateY(3px); } 50% { transform: rotate(4deg) translateY(4px); } }
@@ -61,10 +71,16 @@
 @keyframes star-twinkle { 0%, 100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(0.75) rotate(20deg); } }
 @keyframes wobble { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px) scale(1.1); } }
 @keyframes bounce-soft { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-4px); } }
-@keyframes greet { 0% { transform: translateY(0) rotate(0); } 35% { transform: translateY(-6px) rotate(-3deg); } 70% { transform: translateY(0) rotate(2deg); } 100% { transform: rotate(0); } }
 @keyframes heartbeat { 0%, 100% { transform: scale(1); } 40% { transform: scale(1.18); } }
 @keyframes twinkle { 0%, 100% { transform: scale(0.4) rotate(0deg); opacity: 0.3; } 50% { transform: scale(1.1) rotate(45deg); opacity: 1; } }
 @keyframes float-up { 0% { transform: translateY(8px); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateY(-26px); opacity: 0; } }
 @keyframes tear { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(16px); opacity: 0; } }
 @keyframes sweat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
 @keyframes ping { 0% { opacity: 0; transform: translateX(4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateX(-4px); } }
+@keyframes bounce-big { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-9px); } 60% { transform: translateY(-9px) scaleY(1.02); } }
+@keyframes shy-tilt { to { transform: rotate(-7deg) translateY(2px); } }
+@keyframes caring-tilt { to { transform: rotate(6deg) translateY(1px); } }
+@keyframes huff { 0% { transform: translateY(0); } 40% { transform: translateY(-3px) scale(1.02); } 100% { transform: translateY(0); } }
+@keyframes pout-turn { to { transform: rotate(4deg) translateX(2px); } }
+@keyframes giggle-shake { from { transform: rotate(-2.5deg) translateY(0); } to { transform: rotate(2.5deg) translateY(-2px); } }
+@keyframes puff { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }

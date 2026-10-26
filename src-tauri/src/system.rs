@@ -15,7 +15,18 @@ const MAX_LIST_ENTRIES: usize = 300;
 
 /// Paths under $HOME that hold credentials. Fanta never reads or writes these,
 /// and refuses commands that mention them.
-const SECRET_DIRS: &[&str] = &[".ssh", ".gnupg", ".password-store", ".aws", ".kube", ".docker", ".local/share/keyrings", ".mozilla", ".config/google-chrome", ".config/chromium"];
+const SECRET_DIRS: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".password-store",
+    ".aws",
+    ".kube",
+    ".docker",
+    ".local/share/keyrings",
+    ".mozilla",
+    ".config/google-chrome",
+    ".config/chromium",
+];
 const SECRET_FILES: &[&str] = &[".config/fanta/mcp.json", ".netrc", ".git-credentials", ".pgpass"];
 
 fn home() -> PathBuf {
@@ -71,7 +82,8 @@ pub fn allowed_path(path: &str) -> anyhow::Result<PathBuf> {
         },
     };
     let home = home().canonicalize().unwrap_or_else(|_| home());
-    let rel = resolved.strip_prefix(&home).map_err(|_| anyhow::anyhow!("{} is outside your home folder", p.display()))?;
+    let rel =
+        resolved.strip_prefix(&home).map_err(|_| anyhow::anyhow!("{} is outside your home folder", p.display()))?;
     if is_secret(rel) {
         anyhow::bail!("{} may hold passwords or keys; I don't touch those", p.display());
     }
@@ -112,7 +124,11 @@ pub fn list_dir(args: &Value) -> anyhow::Result<String> {
         .filter_map(Result::ok)
         .map(|e| {
             let meta = e.metadata().ok();
-            (meta.as_ref().is_some_and(|m| m.is_dir()), e.file_name().to_string_lossy().to_string(), meta.map(|m| m.len()).unwrap_or(0))
+            (
+                meta.as_ref().is_some_and(|m| m.is_dir()),
+                e.file_name().to_string_lossy().to_string(),
+                meta.map(|m| m.len()).unwrap_or(0),
+            )
         })
         .collect();
     let hidden = args.get("show_hidden").and_then(Value::as_bool).unwrap_or(false);
@@ -204,7 +220,9 @@ pub async fn run_command(args: &Value) -> anyhow::Result<String> {
         .spawn()?;
     let out = match tokio::time::timeout(COMMAND_TIMEOUT, child.wait_with_output()).await {
         Ok(out) => out?,
-        Err(_) => anyhow::bail!("still running after {}s, so I stopped it. For apps use open_app.", COMMAND_TIMEOUT.as_secs()),
+        Err(_) => {
+            anyhow::bail!("still running after {}s, so I stopped it. For apps use open_app.", COMMAND_TIMEOUT.as_secs())
+        }
     };
     let mut text = String::from_utf8_lossy(&out.stdout).to_string();
     let err = String::from_utf8_lossy(&out.stderr);
@@ -281,7 +299,9 @@ fn find_app<'a>(apps: &'a [(String, String)], query: &str) -> Option<&'a (String
     let q = query.trim().to_lowercase();
     apps.iter()
         .find(|(_, n)| n.to_lowercase() == q)
-        .or_else(|| apps.iter().find(|(id, _)| id.to_lowercase() == q || id.to_lowercase().rsplit('.').next() == Some(&q)))
+        .or_else(|| {
+            apps.iter().find(|(id, _)| id.to_lowercase() == q || id.to_lowercase().rsplit('.').next() == Some(&q))
+        })
         .or_else(|| apps.iter().find(|(_, n)| n.to_lowercase().contains(&q)))
 }
 
@@ -306,7 +326,11 @@ pub fn describe_open(args: &Value) -> anyhow::Result<String> {
 pub fn open_app(args: &Value) -> anyhow::Result<String> {
     let target = arg_str(args, "name").ok_or_else(|| anyhow::anyhow!("name is required"))?;
     if is_url_or_path(target) {
-        let t = if target.contains("://") { target.to_string() } else { allowed_path(target)?.to_string_lossy().to_string() };
+        let t = if target.contains("://") {
+            target.to_string()
+        } else {
+            allowed_path(target)?.to_string_lossy().to_string()
+        };
         std::process::Command::new("xdg-open").arg(&t).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
         return Ok(format!("Opened {target}."));
     }
@@ -348,9 +372,16 @@ mod tests {
 
     #[test]
     fn desktop_entries() {
-        assert_eq!(parse_desktop_entry("[Desktop Entry]\nType=Application\nName=Text Editor\n[Desktop Action new]\nName=New").as_deref(), Some("Text Editor"));
+        assert_eq!(
+            parse_desktop_entry("[Desktop Entry]\nType=Application\nName=Text Editor\n[Desktop Action new]\nName=New")
+                .as_deref(),
+            Some("Text Editor")
+        );
         assert_eq!(parse_desktop_entry("[Desktop Entry]\nName=Hidden\nNoDisplay=true"), None);
-        let apps = vec![("org.gnome.TextEditor".to_string(), "Text Editor".to_string()), ("firefox".to_string(), "Firefox Web Browser".to_string())];
+        let apps = vec![
+            ("org.gnome.TextEditor".to_string(), "Text Editor".to_string()),
+            ("firefox".to_string(), "Firefox Web Browser".to_string()),
+        ];
         assert_eq!(find_app(&apps, "firefox").unwrap().0, "firefox");
         assert_eq!(find_app(&apps, "texteditor").unwrap().0, "org.gnome.TextEditor");
         assert_eq!(find_app(&apps, "text editor").unwrap().0, "org.gnome.TextEditor");

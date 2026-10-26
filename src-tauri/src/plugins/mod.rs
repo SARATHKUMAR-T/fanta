@@ -27,7 +27,11 @@ const MAX_CLOUD_RESULT_CHARS: usize = 24000;
 const SEP: &str = "__";
 
 pub fn result_limit(cloud: bool) -> usize {
-    if cloud { MAX_CLOUD_RESULT_CHARS } else { MAX_RESULT_CHARS }
+    if cloud {
+        MAX_CLOUD_RESULT_CHARS
+    } else {
+        MAX_RESULT_CHARS
+    }
 }
 
 /// Fanta's own desktop-control MCP server (AT-SPI + screenshots), written to the
@@ -171,7 +175,9 @@ impl Plugin {
     fn info(&self) -> PluginInfo {
         let (status, detail) = self.status.lock().unwrap().clone();
         let command = match (&self.config.command, &self.config.url) {
-            (Some(c), _) => std::iter::once(c.clone()).chain(self.config.args.iter().cloned()).collect::<Vec<_>>().join(" "),
+            (Some(c), _) => {
+                std::iter::once(c.clone()).chain(self.config.args.iter().cloned()).collect::<Vec<_>>().join(" ")
+            }
             (None, Some(u)) => u.clone(),
             _ => String::new(),
         };
@@ -313,8 +319,7 @@ impl Host {
     /// plugin loads when it mentions one of its trigger words.
     pub fn schemas_for(&self, context: &str) -> Vec<Value> {
         let plugins = self.plugins.lock().unwrap();
-        let running: Vec<&Arc<Plugin>> =
-            plugins.values().filter(|p| p.status.lock().unwrap().0 == "running").collect();
+        let running: Vec<&Arc<Plugin>> = plugins.values().filter(|p| p.status.lock().unwrap().0 == "running").collect();
         let total: usize = running.iter().map(|p| p.tools.lock().unwrap().len()).sum();
         let words: Vec<String> = context
             .to_lowercase()
@@ -365,7 +370,11 @@ impl Host {
             .map(|p| {
                 let (status, _) = p.status.lock().unwrap().clone();
                 let tools = p.tools.lock().unwrap().len();
-                format!("- {} ({status}, {tools} tools; loads for the local model when the user says: {})", p.name, p.triggers().join(", "))
+                format!(
+                    "- {} ({status}, {tools} tools; loads for the local model when the user says: {})",
+                    p.name,
+                    p.triggers().join(", ")
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -420,13 +429,16 @@ impl Host {
 /// describe their target in an `element` argument. `None` falls back to raw JSON.
 fn describe_action(tool: &str, args: &Value) -> Option<String> {
     let s = |k: &str| args[k].as_str().map(str::trim).filter(|v| !v.is_empty());
-    let short = |v: &str| if v.chars().count() > 300 { v.chars().take(300).collect::<String>() + "…" } else { v.to_string() };
+    let short =
+        |v: &str| if v.chars().count() > 300 { v.chars().take(300).collect::<String>() + "…" } else { v.to_string() };
     let action = tool.strip_prefix("browser_").unwrap_or(tool);
     Some(match action {
         "navigate" => format!("open {}", s("url")?),
         "click" => format!("click “{}”", s("element")?),
         "hover" => format!("hover over “{}”", s("element")?),
-        "type" | "set_text" => format!("type “{}” into “{}”", short(s("text")?), s("element").unwrap_or("the focused field")),
+        "type" | "set_text" => {
+            format!("type “{}” into “{}”", short(s("text")?), s("element").unwrap_or("the focused field"))
+        }
         "press_key" | "press_keys" => format!("press {}", s("key").or(s("keys"))?),
         "select_option" => format!("choose {} in “{}”", args["values"], s("element")?),
         "fill_form" => format!("fill in a form: {}", short(&args["fields"].to_string())),
@@ -500,7 +512,8 @@ pub fn add(name: &str, command_line: &str, triggers: &str) -> anyhow::Result<()>
         entry["triggers"] = json!(triggers);
     }
     let mut cfg = read_config()?;
-    let servers = cfg["mcpServers"].as_object_mut().ok_or_else(|| anyhow::anyhow!("mcp.json has no mcpServers object"))?;
+    let servers =
+        cfg["mcpServers"].as_object_mut().ok_or_else(|| anyhow::anyhow!("mcp.json has no mcpServers object"))?;
     if servers.contains_key(name) {
         anyhow::bail!("a plugin named '{name}' already exists");
     }
@@ -522,9 +535,18 @@ mod tests {
 
     #[test]
     fn describes_browser_actions() {
-        assert_eq!(describe_action("browser_click", &json!({ "element": "Sign in button", "target": "e12" })).unwrap(), "click “Sign in button”");
-        assert_eq!(describe_action("browser_navigate", &json!({ "url": "https://example.com" })).unwrap(), "open https://example.com");
-        assert_eq!(describe_action("browser_type", &json!({ "text": "hi" })).unwrap(), "type “hi” into “the focused field”");
+        assert_eq!(
+            describe_action("browser_click", &json!({ "element": "Sign in button", "target": "e12" })).unwrap(),
+            "click “Sign in button”"
+        );
+        assert_eq!(
+            describe_action("browser_navigate", &json!({ "url": "https://example.com" })).unwrap(),
+            "open https://example.com"
+        );
+        assert_eq!(
+            describe_action("browser_type", &json!({ "text": "hi" })).unwrap(),
+            "type “hi” into “the focused field”"
+        );
         // Missing the describing argument: fall back to raw JSON.
         assert!(describe_action("browser_click", &json!({ "target": "e12" })).is_none());
         assert!(describe_action("create_issue", &json!({})).is_none());

@@ -74,7 +74,7 @@ pub fn status(app: &AppHandle) -> Status {
     let mut keys = BTreeMap::new();
     let mut models = BTreeMap::new();
     for p in &PROVIDERS[1..] {
-        keys.insert(p.to_string(), keyring(p).and_then(|k| Ok(k.get_password().is_ok())).unwrap_or(false));
+        keys.insert(p.to_string(), keyring(p).map(|k| k.get_password().is_ok()).unwrap_or(false));
         models.insert(p.to_string(), model_for(app, p).unwrap_or_default());
     }
     Status {
@@ -141,17 +141,29 @@ async fn chat_with(
     on_token: impl FnMut(&str),
 ) -> anyhow::Result<Message> {
     let state = app.state::<AppState>();
-    let model = model_for(app, provider).ok_or_else(|| anyhow::anyhow!("pick a {provider} model in Settings → Brain"))?;
+    let model =
+        model_for(app, provider).ok_or_else(|| anyhow::anyhow!("pick a {provider} model in Settings → Brain"))?;
     match provider {
         "anthropic" => cloud::anthropic_chat(&state.http, &key_for(provider)?, &model, messages, tools, on_token).await,
-        "openai" => cloud::openai_chat(&state.http, cloud::OPENAI_URL, &key_for(provider)?, &model, messages, tools, on_token).await,
-        "gemini" => cloud::openai_chat(&state.http, cloud::GEMINI_URL, &key_for(provider)?, &model, messages, tools, on_token).await,
+        "openai" => {
+            cloud::openai_chat(&state.http, cloud::OPENAI_URL, &key_for(provider)?, &model, messages, tools, on_token)
+                .await
+        }
+        "gemini" => {
+            cloud::openai_chat(&state.http, cloud::GEMINI_URL, &key_for(provider)?, &model, messages, tools, on_token)
+                .await
+        }
         _ => state.ollama.chat(&model, messages, tools, on_token).await,
     }
 }
 
 /// A chat turn with the user's chosen model.
-pub async fn chat(app: &AppHandle, messages: &[Message], tools: &[Value], on_token: impl FnMut(&str)) -> anyhow::Result<Message> {
+pub async fn chat(
+    app: &AppHandle,
+    messages: &[Message],
+    tools: &[Value],
+    on_token: impl FnMut(&str),
+) -> anyhow::Result<Message> {
     chat_with(app, &provider(app), messages, tools, on_token).await
 }
 

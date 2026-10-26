@@ -438,10 +438,8 @@ fn resolve_task(app: &AppHandle, args: &Value) -> anyhow::Result<db::Task> {
         }
     }
     let needle = needle.ok_or_else(|| anyhow::anyhow!("give an id or title"))?;
-    let matches: Vec<_> = db::list_tasks(&conn, false)?
-        .into_iter()
-        .filter(|t| t.title.to_lowercase().contains(&needle))
-        .collect();
+    let matches: Vec<_> =
+        db::list_tasks(&conn, false)?.into_iter().filter(|t| t.title.to_lowercase().contains(&needle)).collect();
     match matches.len() {
         1 => Ok(matches.into_iter().next().unwrap()),
         0 => anyhow::bail!("no open task matching '{needle}'"),
@@ -539,10 +537,8 @@ fn list_notifications(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
         Some(&since),
         40,
     )?;
-    let items: Vec<_> = items
-        .into_iter()
-        .filter(|n| category != "default" || n.category == "urgent" || n.category == "fyi")
-        .collect();
+    let items: Vec<_> =
+        items.into_iter().filter(|n| category != "default" || n.category == "urgent" || n.category == "fyi").collect();
     if items.is_empty() {
         return Ok(format!("No matching notifications in the last {minutes} minutes."));
     }
@@ -629,7 +625,8 @@ fn get_schedule(app: &AppHandle, args: &Value) -> anyhow::Result<String> {
     let mut out = vec![];
     for i in 0..days {
         let d = first + Duration::days(i);
-        let events = db::events_between(&conn, &format!("{d} 00:00:00"), &format!("{} 00:00:00", d + Duration::days(1)))?;
+        let events =
+            db::events_between(&conn, &format!("{d} 00:00:00"), &format!("{} 00:00:00", d + Duration::days(1)))?;
         let lines = if events.is_empty() {
             "  (no meetings)".to_string()
         } else {
@@ -690,7 +687,8 @@ fn meeting_from_args(args: &Value) -> anyhow::Result<NewMeeting> {
     let start_raw = arg_str(args, "start").ok_or_else(|| anyhow::anyhow!("start is required"))?;
     let start_at = parse_when(start_raw).ok_or_else(|| anyhow::anyhow!("couldn't understand start '{start_raw}'"))?;
     let minutes = arg_i64(args, "duration_minutes").filter(|m| (5..=600).contains(m)).unwrap_or(30);
-    let end_at = (NaiveDateTime::parse_from_str(&start_at, db::TS)? + Duration::minutes(minutes)).format(db::TS).to_string();
+    let end_at =
+        (NaiveDateTime::parse_from_str(&start_at, db::TS)? + Duration::minutes(minutes)).format(db::TS).to_string();
     let attendees = args
         .get("attendees")
         .and_then(Value::as_array)
@@ -713,7 +711,13 @@ fn describe_create_event(app: &AppHandle, args: &Value) -> anyhow::Result<String
         anyhow::bail!("creating events needs Outlook sign-in (not connected, or connected read-only via ICS)");
     }
     let m = meeting_from_args(args)?;
-    let mut text = format!("Create “{}” · {} {}–{}", m.subject, friendly(&m.start_at), calendar::hm(&m.start_at), calendar::hm(&m.end_at));
+    let mut text = format!(
+        "Create “{}” · {} {}–{}",
+        m.subject,
+        friendly(&m.start_at),
+        calendar::hm(&m.start_at),
+        calendar::hm(&m.end_at)
+    );
     if !m.attendees.is_empty() {
         text += &format!(" · invite {}", m.attendees.join(", "));
     }
@@ -751,7 +755,12 @@ fn resolve_event(app: &AppHandle, args: &Value) -> anyhow::Result<db::CalEvent> 
         _ if matches.iter().all(|e| e.subject == matches[0].subject) => Ok(matches.into_iter().next().unwrap()),
         _ => anyhow::bail!(
             "several events match: {}",
-            matches.iter().take(6).map(|e| format!("#{} {} {}", e.num, friendly(&e.start_at), e.subject)).collect::<Vec<_>>().join("; ")
+            matches
+                .iter()
+                .take(6)
+                .map(|e| format!("#{} {} {}", e.num, friendly(&e.start_at), e.subject))
+                .collect::<Vec<_>>()
+                .join("; ")
         ),
     }
 }
@@ -761,7 +770,9 @@ fn graph_response(args: &Value) -> anyhow::Result<(&'static str, &'static str, &
     match arg_str(args, "response").map(str::to_lowercase).as_deref() {
         Some("accept") => Ok(("accept", "Accept", "Accepted")),
         Some("decline") => Ok(("decline", "Decline", "Declined")),
-        Some("tentative") | Some("tentativelyaccept") => Ok(("tentativelyAccept", "Tentatively accept", "Tentatively accepted")),
+        Some("tentative") | Some("tentativelyaccept") => {
+            Ok(("tentativelyAccept", "Tentatively accept", "Tentatively accepted"))
+        }
         _ => anyhow::bail!("response must be accept, decline, or tentative"),
     }
 }

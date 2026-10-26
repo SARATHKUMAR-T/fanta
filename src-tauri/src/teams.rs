@@ -45,7 +45,9 @@ pub struct Teams {
 
 fn require_microsoft(app: &AppHandle) -> anyhow::Result<()> {
     if calendar::provider(app) != "graph" {
-        anyhow::bail!("Teams isn't connected - sign in with Microsoft in Settings → Outlook calendar (it covers Teams too)");
+        anyhow::bail!(
+            "Teams isn't connected - sign in with Microsoft in Settings → Outlook calendar (it covers Teams too)"
+        );
     }
     Ok(())
 }
@@ -54,7 +56,9 @@ fn require_microsoft(app: &AppHandle) -> anyhow::Result<()> {
 fn explain(e: anyhow::Error) -> anyhow::Error {
     let s = e.to_string();
     if s.contains("403") || s.contains("Forbidden") || s.contains("AADSTS65001") {
-        anyhow::anyhow!("Teams needs permission - in Settings, Disconnect and sign in with Microsoft again to allow chats ({s})")
+        anyhow::anyhow!(
+            "Teams needs permission - in Settings, Disconnect and sign in with Microsoft again to allow chats ({s})"
+        )
     } else {
         e
     }
@@ -122,10 +126,8 @@ pub fn resolve<'a>(chats: &'a [Chat], to: &str) -> anyhow::Result<&'a Chat> {
         return Ok(by_label[0]);
     }
     // 2. A person: their 1:1 chat.
-    let direct: Vec<&Chat> = chats
-        .iter()
-        .filter(|c| c.kind == "oneOnOne" && c.others.iter().any(|o| name_matches(o, to)))
-        .collect();
+    let direct: Vec<&Chat> =
+        chats.iter().filter(|c| c.kind == "oneOnOne" && c.others.iter().any(|o| name_matches(o, to))).collect();
     match direct.len() {
         1 => return Ok(direct[0]),
         n if n > 1 => anyhow::bail!(
@@ -135,10 +137,8 @@ pub fn resolve<'a>(chats: &'a [Chat], to: &str) -> anyhow::Result<&'a Chat> {
         _ => {}
     }
     // 3. A group chat whose topic contains the words.
-    let by_topic: Vec<&Chat> = chats
-        .iter()
-        .filter(|c| c.topic.as_deref().is_some_and(|t| norm(t).contains(&want)))
-        .collect();
+    let by_topic: Vec<&Chat> =
+        chats.iter().filter(|c| c.topic.as_deref().is_some_and(|t| norm(t).contains(&want))).collect();
     if by_topic.len() == 1 {
         return Ok(by_topic[0]);
     }
@@ -151,10 +151,7 @@ pub fn resolve<'a>(chats: &'a [Chat], to: &str) -> anyhow::Result<&'a Chat> {
     if groups_with.is_empty() {
         anyhow::bail!("no Teams chat found for '{to}' (Fanta can only message chats that already exist)");
     }
-    anyhow::bail!(
-        "no 1:1 chat with '{to}'. Group chats with them: {} - say which one",
-        groups_with.join("; ")
-    )
+    anyhow::bail!("no 1:1 chat with '{to}'. Group chats with them: {} - say which one", groups_with.join("; "))
 }
 
 /// The chat a captured notification came from. Group chats show up as
@@ -240,7 +237,12 @@ mod tests {
     use super::*;
 
     fn chat(id: &str, kind: &str, topic: Option<&str>, others: &[&str]) -> Chat {
-        Chat { id: id.into(), kind: kind.into(), topic: topic.map(String::from), others: others.iter().map(|s| s.to_string()).collect() }
+        Chat {
+            id: id.into(),
+            kind: kind.into(),
+            topic: topic.map(String::from),
+            others: others.iter().map(|s| s.to_string()).collect(),
+        }
     }
 
     fn sample() -> Vec<Chat> {
@@ -269,10 +271,20 @@ mod tests {
     fn group_chat_from_notification() {
         let c = sample();
         let mut n = db::Notification {
-            id: 1, app: "Google Chrome".into(), source: "Teams".into(), title: "Aarthi Selvakumari, +3".into(),
-            body: String::new(), sender: Some("Akilesh".into()), chat: Some("Aarthi Selvakumari, +3".into()),
-            text: Some("did you push?".into()), category: "fyi".into(), summary: None, reason: None,
-            during_focus: false, seen: false, received_at: String::new(),
+            id: 1,
+            app: "Google Chrome".into(),
+            source: "Teams".into(),
+            title: "Aarthi Selvakumari, +3".into(),
+            body: String::new(),
+            sender: Some("Akilesh".into()),
+            chat: Some("Aarthi Selvakumari, +3".into()),
+            text: Some("did you push?".into()),
+            category: "fyi".into(),
+            summary: None,
+            reason: None,
+            during_focus: false,
+            seen: false,
+            received_at: String::new(),
         };
         assert_eq!(chat_for_notification(&c, &n).unwrap().id, "3");
         n.chat = None;

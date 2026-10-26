@@ -13,6 +13,7 @@ mod plugins;
 mod scheduler;
 mod stats;
 mod system;
+mod teacher;
 mod teams;
 mod tools;
 mod voice;
@@ -92,7 +93,8 @@ fn live_context(state: &AppState, conn: &rusqlite::Connection) -> String {
         );
     }
     if !needs_reply.is_empty() {
-        out += &format!("Likely need a reply from the user (mentions, questions, urgent):\n{}\n", needs_reply.join("\n"));
+        out +=
+            &format!("Likely need a reply from the user (mentions, questions, urgent):\n{}\n", needs_reply.join("\n"));
     }
     out += if calendar::provider_conn(conn) == "graph" {
         "Teams sending: connected - use teams_reply / teams_send_message.\n"
@@ -152,7 +154,8 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, text: String) 
     }
     // Shell and file writes need a model that can plan multi-step work.
     if !cloud {
-        schemas.retain(|t| !matches!(t["function"]["name"].as_str(), Some("run_command" | "write_file" | "run_app_cli")));
+        schemas
+            .retain(|t| !matches!(t["function"]["name"].as_str(), Some("run_command" | "write_file" | "run_app_cli")));
     }
     // Cloud models handle many tools well; the small local model gets only the plugins mentioned.
     schemas.extend(if cloud { state.plugins.all_schemas() } else { state.plugins.schemas_for(&routing_context) });
@@ -234,7 +237,8 @@ fn keep_recent_images(messages: &mut [Message], keep: usize) {
 
 /// Ends a turn the user stopped, keeping a record of what already ran.
 fn stopped(app: &AppHandle, state: &AppState, done: &[String]) -> String {
-    let content = if done.is_empty() { "Stopped.".to_string() } else { format!("Stopped. Done so far: {}", done.join(" ")) };
+    let content =
+        if done.is_empty() { "Stopped.".to_string() } else { format!("Stopped. Done so far: {}", done.join(" ")) };
     let _ = app.emit("chat://token", &content);
     let _ = db::insert_message(&state.db.lock().unwrap(), "assistant", &content);
     content
@@ -254,9 +258,10 @@ fn teams_not_connected_request(app: &AppHandle, text: &str) -> bool {
     }
     let lower = text.to_lowercase();
     let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    let asks_to_send = words.iter().any(|w| ["message", "tell", "reply", "text", "ping", "send", "dm", "msg"].contains(w))
-        || lower.contains("let ") && lower.contains(" know")
-        || lower.contains("on my behalf");
+    let asks_to_send =
+        words.iter().any(|w| ["message", "tell", "reply", "text", "ping", "send", "dm", "msg"].contains(w))
+            || lower.contains("let ") && lower.contains(" know")
+            || lower.contains("on my behalf");
     if !asks_to_send {
         return false;
     }
@@ -277,19 +282,25 @@ fn teams_not_connected_request(app: &AppHandle, text: &str) -> bool {
 }
 
 /// Runs one tool call (built-in or plugin), asking the user first when required.
-async fn dispatch(app: &AppHandle, state: &AppState, name: &str, args: &serde_json::Value, cloud: bool) -> (String, Vec<llm::Image>) {
+async fn dispatch(
+    app: &AppHandle,
+    state: &AppState,
+    name: &str,
+    args: &serde_json::Value,
+    cloud: bool,
+) -> (String, Vec<llm::Image>) {
     let is_plugin = state.plugins.is_plugin_tool(name);
-    let approval = if is_plugin {
-        state.plugins.approval_text(name, args).map(Ok)
-    } else {
-        state.tools.approval(app, name, args)
-    };
+    let approval =
+        if is_plugin { state.plugins.approval_text(name, args).map(Ok) } else { state.tools.approval(app, name, args) };
     match approval {
         Some(Err(e)) => return (format!("error: {e}"), vec![]),
         Some(Ok(description)) => {
             let _ = app.emit("chat://tool", "waiting for your approval");
             if !approvals::ask(app, name, &description).await {
-                return ("The user declined this action. Acknowledge briefly; don't retry unless they ask.".into(), vec![]);
+                return (
+                    "The user declined this action. Acknowledge briefly; don't retry unless they ask.".into(),
+                    vec![],
+                );
             }
         }
         None => {}
@@ -403,7 +414,12 @@ fn mark_inbox_seen(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
 
 /// Lets the user correct a triage decision. Kept for learning preferences later.
 #[tauri::command]
-fn set_notification_category(app: AppHandle, state: State<'_, AppState>, id: i64, category: String) -> Result<(), String> {
+fn set_notification_category(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    category: String,
+) -> Result<(), String> {
     if !["urgent", "fyi", "ignore"].contains(&category.as_str()) {
         return Err(format!("unknown category '{category}'"));
     }
@@ -423,7 +439,11 @@ fn calendar_status(app: AppHandle) -> calendar::Status {
 }
 
 #[tauri::command]
-async fn calendar_sign_in(app: AppHandle, client_id: String, tenant: String) -> Result<calendar::graph::DeviceCode, String> {
+async fn calendar_sign_in(
+    app: AppHandle,
+    client_id: String,
+    tenant: String,
+) -> Result<calendar::graph::DeviceCode, String> {
     if client_id.trim().is_empty() {
         return Err("Enter the Application (client) ID first.".into());
     }
@@ -527,6 +547,31 @@ async fn brain_models(app: AppHandle, provider: String, key: Option<String>) -> 
     brain::list_models(&app, &provider, key.as_deref()).await.map_err(err)
 }
 
+#[tauri::command]
+async fn teach_lesson(app: AppHandle, topic: String, level: String) -> Result<teacher::Lesson, String> {
+    teacher::lesson(&app, &topic, &level).await.map_err(err)
+}
+
+#[tauri::command]
+async fn teach_ask(app: AppHandle, lesson_id: i64, question: String) -> Result<teacher::Answer, String> {
+    teacher::ask(&app, lesson_id, &question).await.map_err(err)
+}
+
+#[tauri::command]
+fn teach_get(app: AppHandle, id: i64) -> Result<teacher::Lesson, String> {
+    teacher::get(&app, id).map_err(err)
+}
+
+#[tauri::command]
+fn teach_recent(state: State<'_, AppState>) -> Result<Vec<teacher::LessonInfo>, String> {
+    db::list_lessons(&state.db.lock().unwrap(), 12).map_err(err)
+}
+
+#[tauri::command]
+fn teach_delete(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    db::delete_lesson(&state.db.lock().unwrap(), id).map_err(err)
+}
+
 /// Sends text the user wrote in a reply box; clicking Send is their approval.
 /// Returns the chat's name.
 #[tauri::command]
@@ -598,6 +643,21 @@ fn toggle_panel(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn hide_panel(app: AppHandle) -> Result<(), String> {
     windows::hide_panel(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn expand_panel(app: AppHandle, expanded: bool) -> Result<(), String> {
+    windows::expand_panel(&app, expanded).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn panel_expanded() -> bool {
+    windows::panel_expanded()
+}
+
+#[tauri::command]
+fn minimize_panel(app: AppHandle) -> Result<(), String> {
+    windows::minimize_panel(&app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -688,7 +748,10 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, e| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left, button_state: MouseButtonState::Up, ..
+                    } = e
+                    {
                         let _ = windows::toggle_panel(tray.app_handle());
                     }
                 })
@@ -737,6 +800,9 @@ pub fn run() {
             open_config_dir,
             toggle_panel,
             hide_panel,
+            expand_panel,
+            panel_expanded,
+            minimize_panel,
             companion_bubble,
             brain_status,
             brain_save_key,
@@ -750,6 +816,11 @@ pub fn run() {
             voice_set_mode,
             voice_should_speak,
             teams_reply,
+            teach_lesson,
+            teach_ask,
+            teach_get,
+            teach_recent,
+            teach_delete,
             sounds_get,
             sounds_set,
             sounds_preview

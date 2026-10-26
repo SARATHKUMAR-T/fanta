@@ -82,10 +82,14 @@ pub fn dnd_off(conn: &Connection) {
 pub fn idle_ms() -> Option<u64> {
     let out = Command::new("gdbus")
         .args([
-            "call", "--session",
-            "--dest", "org.gnome.Mutter.IdleMonitor",
-            "--object-path", "/org/gnome/Mutter/IdleMonitor/Core",
-            "--method", "org.gnome.Mutter.IdleMonitor.GetIdletime",
+            "call",
+            "--session",
+            "--dest",
+            "org.gnome.Mutter.IdleMonitor",
+            "--object-path",
+            "/org/gnome/Mutter/IdleMonitor/Core",
+            "--method",
+            "org.gnome.Mutter.IdleMonitor.GetIdletime",
         ])
         .output()
         .ok()?;
@@ -110,21 +114,21 @@ fn synth_chime(chime: Chime) -> Vec<u8> {
     // (start seconds, frequency Hz)
     let notes: &[(f32, f32)] = match chime {
         Chime::FocusDone => &[(0.0, 659.25), (0.16, 830.61), (0.32, 987.77)], // E5 G#5 B5
-        Chime::BreakDone => &[(0.0, 783.99), (0.2, 587.33)],                 // G5 D5
+        Chime::BreakDone => &[(0.0, 783.99), (0.2, 587.33)],                  // G5 D5
     };
     let length = notes.last().map(|n| n.0).unwrap_or(0.0) + 1.4;
     let n = (length * CHIME_RATE as f32) as usize;
     let mut buf = vec![0f32; n];
     for &(start, freq) in notes {
         let s0 = (start * CHIME_RATE as f32) as usize;
-        for i in s0..n {
+        for (i, sample) in buf.iter_mut().enumerate().skip(s0) {
             let t = (i - s0) as f32 / CHIME_RATE as f32;
             let attack = (t / 0.008).min(1.0);
             let decay = (-t * 3.2).exp();
             let tone = (2.0 * std::f32::consts::PI * freq * t).sin()
                 + 0.35 * (2.0 * std::f32::consts::PI * freq * 2.0 * t).sin() * (-t * 6.0).exp()
                 + 0.12 * (2.0 * std::f32::consts::PI * freq * 3.01 * t).sin() * (-t * 9.0).exp();
-            buf[i] += tone * attack * decay;
+            *sample += tone * attack * decay;
         }
     }
     let peak = buf.iter().fold(0f32, |m, v| m.max(v.abs())).max(1e-6);
@@ -167,7 +171,7 @@ mod tests {
     fn chimes_are_short_and_gentle() {
         for c in [Chime::FocusDone, Chime::BreakDone] {
             let pcm = synth_chime(c);
-            let samples: Vec<i16> = pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+            let samples: Vec<i16> = pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
             let secs = samples.len() as f32 / CHIME_RATE as f32;
             let peak = samples.iter().map(|s| s.unsigned_abs()).max().unwrap();
             assert!((1.4..2.0).contains(&secs), "{secs}s");

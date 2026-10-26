@@ -10,6 +10,8 @@ const empty = params.has("empty");
 const focusing = params.has("focus");
 
 const data: Record<string, (args: any) => unknown> = {
+  brain_models: () => ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"],
+  panel_expanded: () => params.has("expanded"),
   get_persona: () => ({ name: "Fanta", tagline: "your calm focus coach", model: "qwen3:4b-instruct", notifications: { bubbles: "messages" } }),
   brain_status: () => ({
     provider: "anthropic",
@@ -89,6 +91,99 @@ const data: Record<string, (args: any) => unknown> = {
   plugins_info: () => [
     { name: "files", status: "running", detail: null, command: "npx -y @modelcontextprotocol/server-filesystem ~/Documents", triggers: ["files", "folder"], tools: [{ name: "read_text_file", description: "", read_only: true, auto_approve: false }, { name: "write_file", description: "", read_only: false, auto_approve: false }], log: [] },
     { name: "github", status: "error", detail: "GITHUB_PERSONAL_ACCESS_TOKEN not set", command: "npx -y @modelcontextprotocol/server-github", triggers: ["github"], tools: [], log: [] },
+  ],
+  teach_recent: () =>
+    empty
+      ? []
+      : [
+          { id: 1, topic: "How does HTTPS work?", title: "How HTTPS keeps you safe", level: "beginner", created_at: ts(-90) },
+          { id: 2, topic: "git rebase", title: "Rebasing in Git", level: "intermediate", created_at: ts(-1500) },
+        ],
+  teach_lesson: async ({ topic, level }: { topic: string; level: string }) => {
+    await new Promise((r) => setTimeout(r, 2500));
+    return { ...LESSON, topic, level };
+  },
+  teach_get: () => LESSON,
+  teach_ask: async ({ question }: { question: string }) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    return {
+      question,
+      answer: "The certificate is like an ID card signed by someone your browser already trusts. If the signature checks out, the browser knows the site is really who it says it is.",
+      diagram: {
+        kind: "flow",
+        nodes: [{ id: "a", label: "Site shows certificate" }, { id: "b", label: "Browser checks signature" }, { id: "c", label: "Trusted authority?" }, { id: "d", label: "Padlock shown" }],
+        edges: [{ from: "a", to: "b", label: "" }, { from: "b", to: "c", label: "" }, { from: "c", to: "d", label: "yes" }],
+      },
+    };
+  },
+};
+
+const LESSON = {
+  id: 1,
+  topic: "How does HTTPS work?",
+  level: "beginner",
+  title: "How HTTPS keeps you safe",
+  summary: "HTTPS wraps everything your browser and a website say to each other in encryption, so nobody in between can read or change it.",
+  analogy: "It's like sending a letter in a locked box. Only the website has the key, so the postman can carry it but never open it.",
+  overview: {
+    kind: "flow",
+    nodes: [{ id: "a", label: "You type a URL" }, { id: "b", label: "Handshake" }, { id: "c", label: "Shared secret key" }, { id: "d", label: "Encrypted browsing" }],
+    edges: [{ from: "a", to: "b", label: "connect" }, { from: "b", to: "c", label: "agree" }, { from: "c", to: "d", label: "lock" }],
+  },
+  steps: [
+    {
+      title: "Say hello",
+      explain: "Your browser contacts the website and says which kinds of encryption it understands. The website picks one they both know.",
+      example: "Like two people agreeing to speak English before a conversation.",
+      key_point: "First, both sides agree on how to talk.",
+      diagram: {
+        kind: "sequence",
+        nodes: [{ id: "b", label: "Browser" }, { id: "s", label: "Website" }],
+        edges: [{ from: "b", to: "s", label: "Hello, I speak these" }, { from: "s", to: "b", label: "Let's use this one" }],
+      },
+    },
+    {
+      title: "Check the ID",
+      explain: "The website shows a certificate, a digital ID card. Your browser checks it was signed by an authority it trusts.",
+      example: "A bouncer checking a passport before letting someone in.",
+      key_point: "The certificate proves the site is real.",
+      diagram: {
+        kind: "flow",
+        nodes: [{ id: "a", label: "Certificate" }, { id: "b", label: "Browser checks" }, { id: "c", label: "Trusted" }, { id: "d", label: "Warning page" }],
+        edges: [{ from: "a", to: "b", label: "" }, { from: "b", to: "c", label: "valid" }, { from: "b", to: "d", label: "fake" }],
+      },
+    },
+    {
+      title: "Share a secret",
+      explain: "Using clever maths, both sides create the same secret key without ever sending it across the internet.",
+      example: "Mixing paint colours: easy to mix, nearly impossible to un-mix.",
+      key_point: "The key is never sent, only worked out.",
+      diagram: {
+        kind: "tree",
+        nodes: [{ id: "k", label: "Session key" }, { id: "p", label: "Public values" }, { id: "s1", label: "Browser's secret" }, { id: "s2", label: "Site's secret" }],
+        edges: [{ from: "k", to: "p", label: "" }, { from: "k", to: "s1", label: "" }, { from: "k", to: "s2", label: "" }],
+      },
+    },
+    {
+      title: "Talk in code",
+      explain: "Every page, password and click is now encrypted with that key. Anyone listening sees only scrambled data.",
+      example: "Passing notes in a code only you and your friend know.",
+      key_point: "Everything after the handshake is scrambled.",
+      diagram: {
+        kind: "cycle",
+        nodes: [{ id: "a", label: "Encrypt" }, { id: "b", label: "Send" }, { id: "c", label: "Decrypt" }, { id: "d", label: "Reply" }],
+        edges: [{ from: "a", to: "b", label: "" }, { from: "b", to: "c", label: "" }, { from: "c", to: "d", label: "" }, { from: "d", to: "a", label: "" }],
+      },
+    },
+  ],
+  terms: [
+    { term: "Encryption", meaning: "Scrambling data so only someone with the key can read it." },
+    { term: "Certificate", meaning: "A website's digital ID card, signed by a trusted authority." },
+    { term: "Handshake", meaning: "The short setup chat before the secure connection starts." },
+  ],
+  quiz: [
+    { question: "Why can't someone on the same Wi-Fi read your HTTPS traffic?", options: ["The Wi-Fi blocks them", "It's encrypted with a key they don't have", "HTTPS hides your IP address"], answer: 1, why: "Only your browser and the site know the session key." },
+    { question: "What does the certificate prove?", options: ["The site is fast", "The site is who it claims to be", "The site has no viruses"], answer: 1, why: "It's an ID signed by an authority your browser trusts." },
   ],
 };
 

@@ -12,8 +12,14 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1";
 pub const OPENAI_URL: &str = "https://api.openai.com/v1";
 pub const GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 
+/// A streamed tool call so far: id, name, argument JSON text, and any extra fields to echo back.
+type PartialCall = (Option<String>, String, String, Map<String, Value>);
+
 /// Reads a server-sent-events body, calling `on_data` with each `data:` payload.
-async fn for_each_sse(resp: reqwest::Response, mut on_data: impl FnMut(&str) -> anyhow::Result<bool>) -> anyhow::Result<()> {
+async fn for_each_sse(
+    resp: reqwest::Response,
+    mut on_data: impl FnMut(&str) -> anyhow::Result<bool>,
+) -> anyhow::Result<()> {
     let mut buf = Vec::new();
     let mut stream = resp.bytes_stream();
     while let Some(bytes) = stream.next().await {
@@ -53,9 +59,19 @@ fn tool_parts(t: &Value) -> (&str, &str, Value) {
 
 /// Models that take `output_config.effort`; older ones reject it.
 fn anthropic_supports_effort(model: &str) -> bool {
-    ["claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable", "claude-mythos", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
-        .iter()
-        .any(|p| model.starts_with(p))
+    [
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-5",
+        "claude-fable",
+        "claude-mythos",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+    ]
+    .iter()
+    .any(|p| model.starts_with(p))
 }
 
 /// Models where a policy decline should be retried on a fallback model server-side.
@@ -64,7 +80,8 @@ fn anthropic_fallback_eligible(model: &str) -> bool {
 }
 
 fn anthropic_messages(messages: &[Message]) -> (String, Vec<Value>) {
-    let system = messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n\n");
+    let system =
+        messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n\n");
     let mut out: Vec<Value> = vec![];
     for m in messages.iter().filter(|m| m.role != "system") {
         let (role, content) = match m.role.as_str() {
@@ -101,7 +118,10 @@ fn anthropic_messages(messages: &[Message]) -> (String, Vec<Value>) {
                     blocks.extend(m.images.iter().map(|i| json!({ "type": "image", "source": { "type": "base64", "media_type": i.mime, "data": i.data } })));
                     Value::Array(blocks)
                 };
-                ("user", json!([{ "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": content }]))
+                (
+                    "user",
+                    json!([{ "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": content }]),
+                )
             }
             _ => ("user", json!([{ "type": "text", "text": m.content }])),
         };
@@ -123,9 +143,7 @@ fn anthropic_messages(messages: &[Message]) -> (String, Vec<Value>) {
 }
 
 fn anthropic_request(http: &reqwest::Client, key: &str, path: &str) -> reqwest::RequestBuilder {
-    http.post(format!("{ANTHROPIC_URL}/{path}"))
-        .header("x-api-key", key)
-        .header("anthropic-version", "2023-06-01")
+    http.post(format!("{ANTHROPIC_URL}/{path}")).header("x-api-key", key).header("anthropic-version", "2023-06-01")
 }
 
 pub async fn anthropic_chat(
@@ -191,7 +209,9 @@ pub async fn anthropic_chat(
                         let cur = block["text"].as_str().unwrap_or("").to_string();
                         block["text"] = json!(cur + t);
                     }
-                    Some("input_json_delta") => partial_json.entry(i).or_default().push_str(d["partial_json"].as_str().unwrap_or("")),
+                    Some("input_json_delta") => {
+                        partial_json.entry(i).or_default().push_str(d["partial_json"].as_str().unwrap_or(""))
+                    }
                     Some("thinking_delta") => {
                         let cur = block["thinking"].as_str().unwrap_or("").to_string();
                         block["thinking"] = json!(cur + d["thinking"].as_str().unwrap_or(""));
@@ -232,7 +252,10 @@ pub async fn anthropic_chat(
                 block["input"] = input.clone();
                 out.tool_calls.push(ToolCall {
                     id: block["id"].as_str().map(String::from),
-                    function: ToolCallFunction { name: block["name"].as_str().unwrap_or("").to_string(), arguments: input },
+                    function: ToolCallFunction {
+                        name: block["name"].as_str().unwrap_or("").to_string(),
+                        arguments: input,
+                    },
                     extra: Map::new(),
                 });
             }
@@ -269,7 +292,8 @@ pub async fn anthropic_models(http: &reqwest::Client, key: &str) -> anyhow::Resu
 
 fn openai_messages(messages: &[Message]) -> Vec<Value> {
     let mut out = vec![];
-    let system = messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n\n");
+    let system =
+        messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n\n");
     if !system.is_empty() {
         out.push(json!({ "role": "system", "content": system }));
     }
@@ -340,7 +364,7 @@ pub async fn openai_chat(
     let mut out = Message::new("assistant", "");
     // Tool calls stream in pieces keyed by index: id and name first, then argument fragments.
     // Gemini omits `index`, sending each call whole; a new id then means a new call.
-    let mut calls: BTreeMap<u64, (Option<String>, String, String, Map<String, Value>)> = BTreeMap::new();
+    let mut calls: BTreeMap<u64, PartialCall> = BTreeMap::new();
     for_each_sse(resp, |data| {
         if data == "[DONE]" {
             return Ok(false);
@@ -407,7 +431,21 @@ pub async fn openai_models(http: &reqwest::Client, base: &str, key: &str) -> any
         anyhow::bail!("{}", error_text(resp).await);
     }
     let v: Value = resp.json().await?;
-    let skip = ["embedding", "tts", "whisper", "audio", "realtime", "transcribe", "image", "dall-e", "moderation", "search", "imagen", "veo", "aqa"];
+    let skip = [
+        "embedding",
+        "tts",
+        "whisper",
+        "audio",
+        "realtime",
+        "transcribe",
+        "image",
+        "dall-e",
+        "moderation",
+        "search",
+        "imagen",
+        "veo",
+        "aqa",
+    ];
     let mut ids: Vec<String> = v["data"]
         .as_array()
         .into_iter()
@@ -432,7 +470,11 @@ mod tests {
     #[test]
     fn anthropic_history_shape() {
         let mut call = Message::new("assistant", "Checking.");
-        call.tool_calls.push(ToolCall { id: Some("toolu_1".into()), function: ToolCallFunction { name: "list_tasks".into(), arguments: json!({}) }, extra: Map::new() });
+        call.tool_calls.push(ToolCall {
+            id: Some("toolu_1".into()),
+            function: ToolCallFunction { name: "list_tasks".into(), arguments: json!({}) },
+            extra: Map::new(),
+        });
         let mut result = Message::new("tool", "#1 report");
         result.tool_call_id = Some("toolu_1".into());
         let msgs = vec![
@@ -453,7 +495,11 @@ mod tests {
     #[test]
     fn screenshots_reach_both_apis() {
         let mut call = Message::new("assistant", "");
-        call.tool_calls.push(ToolCall { id: Some("c1".into()), function: ToolCallFunction { name: "shot".into(), arguments: json!({}) }, extra: Map::new() });
+        call.tool_calls.push(ToolCall {
+            id: Some("c1".into()),
+            function: ToolCallFunction { name: "shot".into(), arguments: json!({}) },
+            extra: Map::new(),
+        });
         let mut result = Message::new("tool", "screen");
         result.tool_call_id = Some("c1".into());
         result.images.push(crate::llm::Image { mime: "image/png".into(), data: "AAAA".into() });
@@ -475,7 +521,11 @@ mod tests {
         let mut call = Message::new("assistant", "");
         let mut extra = Map::new();
         extra.insert("extra_content".into(), json!({ "google": { "thought_signature": "sig" } }));
-        call.tool_calls.push(ToolCall { id: Some("c1".into()), function: ToolCallFunction { name: "x".into(), arguments: json!({"a": 1}) }, extra });
+        call.tool_calls.push(ToolCall {
+            id: Some("c1".into()),
+            function: ToolCallFunction { name: "x".into(), arguments: json!({"a": 1}) },
+            extra,
+        });
         let mut result = Message::new("tool", "ok");
         result.tool_call_id = Some("c1".into());
         let out = openai_messages(&[Message::new("system", "s"), Message::new("user", "hi"), call, result]);
@@ -500,7 +550,8 @@ mod live_tests {
         let tools = vec![json!({ "type": "function", "function": {
             "name": "start_focus", "description": "Start a focus block",
             "parameters": { "type": "object", "properties": { "minutes": { "type": "integer" } } } } })];
-        let mut msgs = vec![Message::new("system", "Use tools when asked."), Message::new("user", "ok lets focus on something")];
+        let mut msgs =
+            vec![Message::new("system", "Use tools when asked."), Message::new("user", "ok lets focus on something")];
 
         let first = openai_chat(&http, GEMINI_URL, &key, &model, &msgs, &tools, |_| {}).await.unwrap();
         assert!(!first.tool_calls.is_empty(), "expected a tool call, got {:?}", first.content);

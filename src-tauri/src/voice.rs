@@ -86,7 +86,8 @@ pub fn installed() -> bool {
 pub fn status(app: &AppHandle) -> Status {
     let state = app.state::<AppState>();
     let v = &state.voice;
-    let speak_mode = db::get_setting(&state.db.lock().unwrap(), SPEAK_MODE).ok().flatten().unwrap_or_else(|| "voice".into());
+    let speak_mode =
+        db::get_setting(&state.db.lock().unwrap(), SPEAK_MODE).ok().flatten().unwrap_or_else(|| "voice".into());
     let speaking = v.speaker.lock().unwrap().is_some();
     Status {
         installed: installed(),
@@ -143,7 +144,8 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
         std::fs::create_dir_all(dir())?;
         download(app, &PIPER, "speech engine").await?;
         if !piper_bin().exists() {
-            let ok = Command::new("tar").arg("xzf").arg(dir().join(PIPER.file)).arg("-C").arg(dir()).status()?.success();
+            let ok =
+                Command::new("tar").arg("xzf").arg(dir().join(PIPER.file)).arg("-C").arg(dir()).status()?.success();
             if !ok {
                 anyhow::bail!("couldn't unpack the speech engine");
             }
@@ -196,11 +198,11 @@ fn capture(mut input: impl Read, stop: &AtomicBool, mut on_level: impl FnMut(f32
             }
             anyhow::bail!("the microphone stopped");
         }
-        let frame: Vec<i16> = buf.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+        let frame: Vec<i16> = buf.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
         let level = rms(&frame);
         samples.extend_from_slice(&frame);
         frames += 1;
-        if frames % 4 == 0 {
+        if frames.is_multiple_of(4) {
             on_level((level / 4000.0).min(1.0));
         }
         let now = samples.len();
@@ -259,7 +261,7 @@ fn transcribe(samples: &[f32]) -> anyhow::Result<String> {
     }
     // Whisper marks non-speech like "[BLANK_AUDIO]" or "(wind blowing)".
     let cleaned: String = text
-        .split(|c| c == '[' || c == '(')
+        .split(['[', '('])
         .enumerate()
         .map(|(i, part)| if i == 0 { part } else { part.split_once([']', ')']).map(|(_, rest)| rest).unwrap_or("") })
         .collect();
@@ -466,23 +468,50 @@ mod real_tests {
         let said = "Hey Fanta, remind me at four to send the budget report.";
         let t = Instant::now();
         let mut piper = Command::new(piper_bin())
-            .arg("--model").arg(voice_path()).arg("--output-raw")
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
-            .spawn().unwrap();
+            .arg("--model")
+            .arg(voice_path())
+            .arg("--output-raw")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
         piper.stdin.take().unwrap().write_all(said.as_bytes()).unwrap();
         let mut raw = vec![];
         piper.stdout.take().unwrap().read_to_end(&mut raw).unwrap();
+        piper.wait().unwrap();
         println!("tts: {} bytes in {:?}", raw.len(), t.elapsed());
 
         // 22.05 kHz -> 16 kHz for whisper
         let mut ff = Command::new("ffmpeg")
-            .args(["-loglevel", "error", "-f", "s16le", "-ar", &sample_rate().to_string(), "-ac", "1", "-i", "-", "-f", "s16le", "-ar", "16000", "-"])
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+            .args([
+                "-loglevel",
+                "error",
+                "-f",
+                "s16le",
+                "-ar",
+                &sample_rate().to_string(),
+                "-ac",
+                "1",
+                "-i",
+                "-",
+                "-f",
+                "s16le",
+                "-ar",
+                "16000",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
         let mut stdin = ff.stdin.take().unwrap();
         std::thread::spawn(move || stdin.write_all(&raw).unwrap());
         let mut pcm = vec![];
         ff.stdout.take().unwrap().read_to_end(&mut pcm).unwrap();
-        let samples: Vec<f32> = pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
+        ff.wait().unwrap();
+        let samples: Vec<f32> =
+            pcm.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
 
         let t = Instant::now();
         let heard = transcribe(&samples).unwrap();

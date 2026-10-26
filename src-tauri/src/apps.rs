@@ -25,7 +25,8 @@ pub struct AppCli {
 }
 
 fn search_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let mut dirs: Vec<PathBuf> =
+        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     // pip --user installs land here, and a GUI-launched app may not have it on PATH.
     if let Some(h) = dirs::home_dir() {
         dirs.push(h.join(".local/bin"));
@@ -103,7 +104,11 @@ fn skill_md(script: &Path, app: &str) -> Option<String> {
 fn skill_description(md: &str) -> Option<String> {
     let body = md.strip_prefix("---")?;
     let front = &body[..body.find("\n---")?];
-    front.lines().find_map(|l| l.strip_prefix("description:")).map(|d| d.trim().trim_matches('"').to_string()).filter(|d| !d.is_empty())
+    front
+        .lines()
+        .find_map(|l| l.strip_prefix("description:"))
+        .map(|d| d.trim().trim_matches('"').to_string())
+        .filter(|d| !d.is_empty())
 }
 
 async fn run(cli: &AppCli, args: &[String], timeout: Duration) -> anyhow::Result<String> {
@@ -164,7 +169,9 @@ pub async fn help(args: &Value) -> anyhow::Result<String> {
 /// The CLI arguments after `--json`. Accepts an array or one string ("layer add -n Bg").
 fn cli_args(args: &Value) -> anyhow::Result<Vec<String>> {
     let argv: Vec<String> = match args.get("args") {
-        Some(Value::Array(a)) => a.iter().map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).collect(),
+        Some(Value::Array(a)) => {
+            a.iter().map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).collect()
+        }
         Some(Value::String(s)) => shell_words::split(s)?,
         _ => vec![],
     };
@@ -203,7 +210,7 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(dir.join("cli-anything-notexec"), "").unwrap();
         std::fs::write(dir.join("other-tool"), "").unwrap();
-        let found = discover_in(&[dir.clone()]);
+        let found = discover_in(std::slice::from_ref(&dir));
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].app, "gimp");
         std::fs::remove_dir_all(dir).unwrap();
@@ -211,8 +218,14 @@ mod tests {
 
     #[test]
     fn parses_args_and_refuses_repl() {
-        assert_eq!(cli_args(&json!({ "args": ["layer", "add", "-n", "Big bg"] })).unwrap(), vec!["layer", "add", "-n", "Big bg"]);
-        assert_eq!(cli_args(&json!({ "args": "layer add -n 'Big bg'" })).unwrap(), vec!["layer", "add", "-n", "Big bg"]);
+        assert_eq!(
+            cli_args(&json!({ "args": ["layer", "add", "-n", "Big bg"] })).unwrap(),
+            vec!["layer", "add", "-n", "Big bg"]
+        );
+        assert_eq!(
+            cli_args(&json!({ "args": "layer add -n 'Big bg'" })).unwrap(),
+            vec!["layer", "add", "-n", "Big bg"]
+        );
         assert!(cli_args(&json!({ "args": [] })).is_err());
         assert!(cli_args(&json!({})).is_err());
     }

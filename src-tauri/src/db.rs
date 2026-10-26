@@ -110,6 +110,14 @@ pub fn open() -> anyhow::Result<Connection> {
             sync_id TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS calendar_events_start ON calendar_events (start_at);
+        CREATE TABLE IF NOT EXISTS lessons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic TEXT NOT NULL,
+            title TEXT NOT NULL,
+            level TEXT NOT NULL,
+            json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -208,9 +216,7 @@ pub fn add_task(conn: &Connection, title: &str, due_at: Option<&str>, remind_at:
 }
 
 pub fn get_task(conn: &Connection, id: i64) -> anyhow::Result<Option<Task>> {
-    Ok(conn
-        .query_row(&format!("SELECT {TASK_COLS} FROM tasks WHERE id = ?1"), params![id], task_row)
-        .optional()?)
+    Ok(conn.query_row(&format!("SELECT {TASK_COLS} FROM tasks WHERE id = ?1"), params![id], task_row).optional()?)
 }
 
 /// Open tasks first (soonest due first), then done tasks (most recent first).
@@ -276,7 +282,12 @@ pub fn active_session(conn: &Connection) -> anyhow::Result<Option<FocusSession>>
         .optional()?)
 }
 
-pub fn start_session(conn: &Connection, kind: &str, minutes: u32, task_id: Option<i64>) -> anyhow::Result<FocusSession> {
+pub fn start_session(
+    conn: &Connection,
+    kind: &str,
+    minutes: u32,
+    task_id: Option<i64>,
+) -> anyhow::Result<FocusSession> {
     let now = chrono::Local::now();
     let ends = now + chrono::Duration::minutes(minutes as i64);
     conn.execute(
@@ -309,7 +320,10 @@ pub fn end_session(conn: &Connection, id: i64, completed: bool) -> anyhow::Resul
 }
 
 pub fn pause_session(conn: &Connection, id: i64) -> anyhow::Result<()> {
-    conn.execute("UPDATE focus_sessions SET paused_at = ?2 WHERE id = ?1 AND paused_at IS NULL", params![id, now_ts()])?;
+    conn.execute(
+        "UPDATE focus_sessions SET paused_at = ?2 WHERE id = ?1 AND paused_at IS NULL",
+        params![id, now_ts()],
+    )?;
     Ok(())
 }
 
@@ -367,6 +381,40 @@ pub fn last_focus_activity(conn: &Connection) -> anyhow::Result<Option<String>> 
             |r| r.get(0),
         )
         .optional()?)
+}
+
+// ---- teacher lessons ----
+
+pub fn insert_lesson(conn: &Connection, topic: &str, title: &str, level: &str, json: &str) -> anyhow::Result<i64> {
+    conn.execute(
+        "INSERT INTO lessons (topic, title, level, json, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![topic, title, level, json, now_ts()],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_lesson(conn: &Connection, id: i64) -> anyhow::Result<Option<String>> {
+    Ok(conn.query_row("SELECT json FROM lessons WHERE id = ?1", params![id], |r| r.get(0)).optional()?)
+}
+
+/// Newest first.
+pub fn list_lessons(conn: &Connection, limit: usize) -> anyhow::Result<Vec<crate::teacher::LessonInfo>> {
+    let mut stmt = conn.prepare("SELECT id, topic, title, level, created_at FROM lessons ORDER BY id DESC LIMIT ?1")?;
+    let rows = stmt.query_map(params![limit as i64], |r| {
+        Ok(crate::teacher::LessonInfo {
+            id: r.get(0)?,
+            topic: r.get(1)?,
+            title: r.get(2)?,
+            level: r.get(3)?,
+            created_at: r.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn delete_lesson(conn: &Connection, id: i64) -> anyhow::Result<()> {
+    conn.execute("DELETE FROM lessons WHERE id = ?1", params![id])?;
+    Ok(())
 }
 
 // ---- captured notifications ----
@@ -443,7 +491,13 @@ pub fn get_notification(conn: &Connection, id: i64) -> anyhow::Result<Option<Not
         .optional()?)
 }
 
-pub fn set_triage(conn: &Connection, id: i64, category: &str, summary: Option<&str>, reason: Option<&str>) -> anyhow::Result<()> {
+pub fn set_triage(
+    conn: &Connection,
+    id: i64,
+    category: &str,
+    summary: Option<&str>,
+    reason: Option<&str>,
+) -> anyhow::Result<()> {
     conn.execute(
         "UPDATE notifications SET category = ?2, summary = COALESCE(?3, summary), reason = COALESCE(?4, reason) WHERE id = ?1",
         params![id, category, summary, reason],
@@ -465,6 +519,22 @@ pub fn list_notifications(
     ))?;
     let rows = stmt.query_map(params![category, since, limit as i64], notif_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The messages just before `n` in the same conversation (same chat, or the
+/// same direct-message sender), from the last few hours. Oldest first.
+pub fn earlier_in_chat(conn: &Connection, n: &Notification, limit: usize) -> anyhow::Result<Vec<Notification>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {NOTIF_COLS} FROM notifications
+         WHERE source = ?1 AND id < ?2 AND COALESCE(chat, title) = ?3 AND category != 'ignore'
+           AND received_at >= datetime('now', 'localtime', '-3 hours')
+         ORDER BY id DESC LIMIT ?4"
+    ))?;
+    let key = n.chat.as_deref().unwrap_or(&n.title);
+    let mut rows: Vec<Notification> =
+        stmt.query_map(params![n.source, n.id, key, limit as i64], notif_row)?.collect::<Result<_, _>>()?;
+    rows.reverse();
+    Ok(rows)
 }
 
 pub fn pending_notifications(conn: &Connection) -> anyhow::Result<Vec<i64>> {
@@ -534,7 +604,8 @@ const CAL_COLS: &str =
     "num, remote_id, subject, start_at, end_at, all_day, location, join_url, organizer, response, show_as, cancelled";
 
 /// Events that actually block the user's time.
-const BUSY: &str = "all_day = 0 AND cancelled = 0 AND COALESCE(response, '') != 'declined' AND COALESCE(show_as, '') != 'free'";
+const BUSY: &str =
+    "all_day = 0 AND cancelled = 0 AND COALESCE(response, '') != 'declined' AND COALESCE(show_as, '') != 'free'";
 
 fn cal_row(r: &rusqlite::Row) -> rusqlite::Result<CalEvent> {
     Ok(CalEvent {
@@ -643,9 +714,7 @@ pub fn mark_event_notified(conn: &Connection, num: i64) -> anyhow::Result<()> {
 // ---- settings (small key/value state) ----
 
 pub fn get_setting(conn: &Connection, key: &str) -> anyhow::Result<Option<String>> {
-    Ok(conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0)).optional()?)
 }
 
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> anyhow::Result<()> {

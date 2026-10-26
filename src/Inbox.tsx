@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { api, Category, friendlyTime, InboxItem } from "./api";
+import { Option, Select } from "./ui/Select";
 
 type Filter = "all" | Category;
+
+const CATEGORIES: Option<Category | "pending">[] = [
+  { value: "urgent", label: "Urgent", hint: "Interrupt me", icon: <span className="cat-dot urgent" /> },
+  { value: "fyi", label: "FYI", hint: "Show it, no rush", icon: <span className="cat-dot fyi" /> },
+  { value: "ignore", label: "Ignore", hint: "Keep it quiet", icon: <span className="cat-dot ignore" /> },
+];
+const SORTING: Option<Category | "pending"> = { value: "pending", label: "Sorting…", icon: <span className="cat-dot pending" /> };
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
@@ -56,17 +64,16 @@ export default function Inbox({ visible }: { visible: boolean }) {
               <span className="source">{n.source}</span>
               <span className="muted">{friendlyTime(n.received_at)}</span>
               {n.during_focus && <span className="chip">held during focus</span>}
-              <select
+              <Select
+                size="sm"
+                align="end"
+                minWidth={190}
                 className={`cat ${n.category}`}
                 value={n.category}
-                title={n.reason ?? undefined}
-                onChange={(e) => api.setNotificationCategory(n.id, e.target.value as Category)}
-              >
-                {n.category === "pending" && <option value="pending">sorting…</option>}
-                <option value="urgent">urgent</option>
-                <option value="fyi">fyi</option>
-                <option value="ignore">ignore</option>
-              </select>
+                title={n.reason ? `Why: ${n.reason}` : "Change category"}
+                options={n.category === "pending" ? [SORTING, ...CATEGORIES] : CATEGORIES}
+                onChange={(c) => c !== "pending" && api.setNotificationCategory(n.id, c)}
+              />
             </div>
             <div className="notif-from">
               <b>{n.sender ?? n.title}</b>
