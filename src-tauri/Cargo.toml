@@ -26,7 +26,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "5"
 chrono = "0.4"
 anyhow = "1"
-zbus = "5"
+zbus = "6"
 notify-rust = "4"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 rrule = "0.14"
